@@ -66,8 +66,11 @@ def test_clone_url_has_no_credentials(tmp_path):
 
 
 def test_clone_passes_token_via_one_shot_config(tmp_path):
-    """The token must arrive via `-c http.*.extraheader=Authorization: Bearer ...`,
-    which is process-scoped and not written into .git/config."""
+    """The token must arrive via `-c http.<url>.extraheader=AUTHORIZATION: basic <b64>`,
+    which is process-scoped and not written into .git/config. (Basic, not Bearer:
+    GitHub's smart-HTTP wants Basic for git operations.)"""
+    import base64
+
     gh = _gh()
     completed = MagicMock(returncode=0, stdout="", stderr="")
     with patch("secscan.github.subprocess.run", return_value=completed) as m:
@@ -76,8 +79,16 @@ def test_clone_passes_token_via_one_shot_config(tmp_path):
     # -c <key=val> appears as two consecutive list entries.
     assert "-c" in args
     c_idx = args.index("-c")
-    assert "extraheader" in args[c_idx + 1]
-    assert f"Bearer {TOKEN}" in args[c_idx + 1]
+    extraheader = args[c_idx + 1]
+    assert "extraheader" in extraheader
+    assert "basic " in extraheader.lower()
+    # The base64-encoded credential must be present and decode back to x-access-token:TOKEN
+    encoded = extraheader.split("basic ", 1)[-1]
+    decoded = base64.b64decode(encoded).decode()
+    assert decoded == f"x-access-token:{TOKEN}"
+    # And the raw token must NOT appear unencoded anywhere on argv (only its base64 form is OK).
+    for a in args:
+        assert TOKEN not in a, f"raw token leaked into argv: {a!r}"
 
 
 def test_clone_scrubs_token_from_error(tmp_path):

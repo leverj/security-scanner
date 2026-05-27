@@ -7,6 +7,7 @@ in log output or raised exceptions.
 
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 import time
@@ -47,15 +48,17 @@ class GitHub:
     def clone(self, ref: str, dest: Path, shallow: bool = True) -> None:
         """Git-clone the repo at `ref` into `dest`. Token never leaks on failure.
 
-        The token is passed via `http.extraheader` set with `-c`, which is process-scoped
-        and is NOT written into the resulting `.git/config`. The clone URL itself contains
-        no credentials.
+        The token is passed via `http.<url>.extraheader` set with `-c`, which is
+        process-scoped and is NOT written into the resulting `.git/config`. The clone
+        URL itself contains no credentials. We use HTTP Basic (the format GitHub's
+        smart-HTTP protocol expects); Bearer works for the REST API but not for git.
         """
         url = f"https://github.com/{self.owner}/{self.name}.git"
+        basic = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
         # `-c` config is one-shot for this invocation only; nothing persists into .git/config.
         cmd = [
             "git",
-            "-c", f"http.https://github.com/.extraheader=Authorization: Bearer {self.token}",
+            "-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}",
             "clone",
         ]
         if shallow:
@@ -72,11 +75,17 @@ class GitHub:
             raise GitHubError(0, f"git clone failed: {err.strip()}")
 
     def _scrub(self, text: str) -> str:
-        """Remove the token (and the userinfo prefix) from arbitrary output."""
+        """Remove the token (raw and base64-encoded forms) from arbitrary output."""
         if not text:
             return text
         out = text.replace(self.token, "***")
         out = out.replace(f"x-access-token:{self.token}", "x-access-token:***")
+        # If git ever echoes the extraheader value, scrub the base64-encoded credential too.
+        try:
+            basic = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
+            out = out.replace(basic, "***")
+        except Exception:
+            pass
         return out
 
     # ---- sub-issue listing ----------------------------------------------
