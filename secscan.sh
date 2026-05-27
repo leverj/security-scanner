@@ -3,13 +3,20 @@
 #
 #   ./secscan.sh build              -> docker build the image
 #   ./secscan.sh run [args...]      -> docker run, default --dry-run, forwards extra args
+#   ./secscan.sh check              -> validate setup (config, secrets, docker, image)
 #
-# Secret sourcing is controlled by `secrets.source` in config.yaml:
-#   source: env         -> assumes GITHUB_TOKEN (etc.) are already exported in your shell
-#   source: 1password   -> auto-prefixes the command with `op run --env-file=<env_file>`
+# Two things are config-driven and read from config.yaml at runtime:
 #
-# Optional env (forwarded into the container if set):
-#   SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+#   secrets.source        env | 1password   — how GITHUB_TOKEN (and Slack vars) are sourced
+#   slack.enabled         bool              — whether to wire Slack at all
+#   slack.webhook_url_env name              — env var holding the incoming webhook URL
+#   slack.channel_id_env  name              — env var holding the channel id (chat.postMessage)
+#   slack.bot_token_env   name              — env var holding the bot token (chat.postMessage)
+#
+# Required env (only when secrets.source=env):
+#   GITHUB_TOKEN          PAT with repo scope on the target repo
+# Required env (only when slack.enabled=true AND secrets.source=env):
+#   the var named by slack.webhook_url_env  (or BOTH channel_id_env and bot_token_env)
 #
 # Config: defaults to ./config.yaml; override with `--config /path/to/cfg.yaml` before
 # any other args, or set SECSCAN_CONFIG=... in env.
@@ -20,6 +27,7 @@ IMAGE="${SECSCAN_IMAGE:-secscan:latest}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { echo "error: $*" >&2; exit 1; }
+warn() { echo "warning: $*" >&2; }
 
 # Resolve a python that can `import yaml` — needed to read the config's secrets block.
 pick_python() {
@@ -58,11 +66,133 @@ except Exception:
 PYEOF
 }
 
+# is_truthy <string> — handles yaml-ish bool spellings
+is_truthy() {
+  case "${1,,}" in true|yes|on|1) return 0 ;; *) return 1 ;; esac
+}
+
+# Build the docker -e flags from configured slack vars. Sets globals:
+#   ENV_VARS_TO_FORWARD   array of env var names (e.g. GITHUB_TOKEN SLACK_WEBHOOK_URL)
+#   SLACK_MODE            "off" | "webhook:<var>" | "chat:<chan>+<tok>"
+#   SLACK_REQUIRED_VARS   array of var names that MUST be non-empty for slack.enabled
+plan_env_forwarding() {
+  local cfg="$1"
+  ENV_VARS_TO_FORWARD=(GITHUB_TOKEN)
+  SLACK_REQUIRED_VARS=()
+  SLACK_MODE="off"
+
+  local slack_enabled webhook_var channel_var bot_var
+  slack_enabled="$(read_config_field "$cfg" "slack.enabled" "false")"
+  if ! is_truthy "$slack_enabled"; then
+    return 0
+  fi
+
+  webhook_var="$(read_config_field "$cfg" "slack.webhook_url_env" "")"
+  channel_var="$(read_config_field "$cfg" "slack.channel_id_env" "")"
+  bot_var="$(read_config_field "$cfg" "slack.bot_token_env" "")"
+
+  if [[ -n "$webhook_var" ]]; then
+    ENV_VARS_TO_FORWARD+=("$webhook_var")
+    SLACK_REQUIRED_VARS+=("$webhook_var")
+    SLACK_MODE="webhook:$webhook_var"
+  elif [[ -n "$channel_var" && -n "$bot_var" ]]; then
+    ENV_VARS_TO_FORWARD+=("$channel_var" "$bot_var")
+    SLACK_REQUIRED_VARS+=("$channel_var" "$bot_var")
+    SLACK_MODE="chat:$channel_var+$bot_var"
+  else
+    warn "slack.enabled=true but neither slack.webhook_url_env nor (channel_id_env + bot_token_env) is set in $cfg; Slack will be skipped"
+  fi
+}
+
 cmd_build() {
   command -v docker >/dev/null || die "docker not on PATH"
   echo "building $IMAGE from $HERE ..."
   docker build -t "$IMAGE" "$HERE"
   echo "done: $IMAGE"
+}
+
+cmd_check() {
+  local config="${SECSCAN_CONFIG:-$HERE/config.yaml}"
+  local ok=1
+
+  echo "== config =="
+  if [[ -f "$config" ]]; then
+    echo "  ✓ $config"
+  else
+    echo "  ✗ $config (cp config.example.yaml config.yaml)"
+    ok=0
+  fi
+
+  echo "== docker =="
+  if command -v docker >/dev/null; then
+    if docker info >/dev/null 2>&1; then
+      echo "  ✓ docker is running"
+    else
+      echo "  ✗ docker installed but daemon not reachable (is Docker Desktop running?)"
+      ok=0
+    fi
+  else
+    echo "  ✗ docker not on PATH (install Docker Desktop or `brew install --cask docker`)"
+    ok=0
+  fi
+
+  echo "== image =="
+  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "  ✓ $IMAGE present"
+  else
+    echo "  ⚠ $IMAGE not built yet — run: ./secscan.sh build"
+  fi
+
+  if [[ -f "$config" ]]; then
+    local secrets_source slack_enabled
+    secrets_source="$(read_config_field "$config" "secrets.source" "env")"
+    slack_enabled="$(read_config_field "$config" "slack.enabled" "false")"
+    plan_env_forwarding "$config"
+
+    echo "== secrets ($secrets_source) =="
+    case "$secrets_source" in
+      env)
+        local missing=()
+        [[ -n "${GITHUB_TOKEN:-}" ]] && echo "  ✓ GITHUB_TOKEN set" || { echo "  ✗ GITHUB_TOKEN unset (export it)"; missing+=(GITHUB_TOKEN); ok=0; }
+        for v in "${SLACK_REQUIRED_VARS[@]+"${SLACK_REQUIRED_VARS[@]}"}"; do
+          if [[ -n "${!v:-}" ]]; then
+            echo "  ✓ $v set"
+          else
+            echo "  ✗ $v unset (slack.enabled=true requires this)"
+            missing+=("$v")
+            ok=0
+          fi
+        done
+        ;;
+      1password|1Password|op)
+        local ef; ef="$(read_config_field "$config" "secrets.env_file" ".env.1password.tpl")"
+        [[ "$ef" = /* ]] || ef="$HERE/$ef"
+        if command -v op >/dev/null; then echo "  ✓ op (1Password CLI) installed"; else echo "  ✗ op not installed (brew install 1password-cli)"; ok=0; fi
+        if op account list >/dev/null 2>&1; then echo "  ✓ op signed in"; else echo "  ⚠ op not signed in (run: op signin)"; fi
+        if [[ -f "$ef" ]]; then echo "  ✓ $ef present"; else echo "  ✗ $ef missing (cp .env.1password.tpl.example .env.1password.tpl)"; ok=0; fi
+        ;;
+      *)
+        echo "  ✗ secrets.source must be 'env' or '1password', got: $secrets_source"
+        ok=0
+        ;;
+    esac
+
+    echo "== slack =="
+    if is_truthy "$slack_enabled"; then
+      echo "  ✓ enabled — mode: $SLACK_MODE"
+    else
+      echo "  · disabled"
+    fi
+  fi
+
+  echo
+  if [[ $ok -eq 1 ]]; then
+    echo "all good. try: ./secscan.sh run"
+    return 0
+  else
+    echo "fix the ✗ items above, then re-run ./secscan.sh check"
+    return 1
+  fi
 }
 
 cmd_run() {
@@ -117,11 +247,14 @@ EOF
   secrets_source="$(read_config_field "$config" "secrets.source" "env")"
   env_file="$(read_config_field "$config" "secrets.env_file" ".env.1password.tpl")"
 
+  # Decide which env vars to forward into the container, based on slack config.
+  plan_env_forwarding "$config"
+
   # IMPORTANT: pass `-e VAR` (no value) so the secret is read from this shell's
   # env by docker, not interpolated into argv where `ps` would show it.
-  local env_args=(-e GITHUB_TOKEN)
-  for var in SLACK_WEBHOOK_URL SLACK_BOT_TOKEN SLACK_CHANNEL_ID; do
-    env_args+=(-e "$var")
+  local env_args=()
+  for v in "${ENV_VARS_TO_FORWARD[@]}"; do
+    env_args+=(-e "$v")
   done
 
   # Build the final command. With secrets.source=1password, the *outer* op run
@@ -148,10 +281,29 @@ Two ways to fix this:
        cp .env.1password.tpl.example .env.1password.tpl
        \$EDITOR .env.1password.tpl               # set op:// vault paths
        ./secscan.sh run
+
+Run \`./secscan.sh check\` to see your full setup status.
 EOF
         exit 1
       fi
-      echo "secrets: env (using already-exported shell variables)" >&2
+      local missing_slack=()
+      for v in "${SLACK_REQUIRED_VARS[@]+"${SLACK_REQUIRED_VARS[@]}"}"; do
+        [[ -z "${!v:-}" ]] && missing_slack+=("$v")
+      done
+      if [[ ${#missing_slack[@]} -gt 0 ]]; then
+        cat >&2 <<EOF
+error: slack.enabled=true but these vars are unset in your shell: ${missing_slack[*]}
+
+Either export them:
+  export ${missing_slack[0]}=...
+
+…or set slack.enabled: false in $config to disable Slack for this run.
+
+Run \`./secscan.sh check\` to see your full setup status.
+EOF
+        exit 1
+      fi
+      echo "secrets: env (shell exports)  slack: $SLACK_MODE" >&2
       exec docker run --rm \
         -v "$config":/config/config.yaml:ro \
         "${env_args[@]}" \
@@ -184,7 +336,13 @@ The template lists every env var secscan understands.
 EOF
         exit 1
       fi
-      echo "secrets: 1password (op run --env-file=$ef)" >&2
+      if [[ ${#SLACK_REQUIRED_VARS[@]} -gt 0 ]]; then
+        # Best-effort sanity check: warn if the Slack vars aren't referenced in the env file.
+        for v in "${SLACK_REQUIRED_VARS[@]}"; do
+          grep -qE "^\s*${v}\s*=" "$ef" || warn "$v not referenced in $ef but slack.enabled=true; add 'op://...' line or set slack.enabled: false"
+        done
+      fi
+      echo "secrets: 1password ($ef)  slack: $SLACK_MODE" >&2
       exec op run --env-file="$ef" -- docker run --rm \
         -v "$config":/config/config.yaml:ro \
         "${env_args[@]}" \
@@ -199,6 +357,7 @@ EOF
 case "${1:-}" in
   build) shift; cmd_build "$@" ;;
   run)   shift; cmd_run "$@" ;;
+  check) shift; cmd_check "$@" ;;
   ""|-h|--help)
     cat <<EOF
 secscan.sh — build/run the secscan container
@@ -206,17 +365,28 @@ secscan.sh — build/run the secscan container
 usage:
   ./secscan.sh build
   ./secscan.sh run [--config path/to/config.yaml] [--dry-run|--no-dry-run] [extra secscan args...]
+  ./secscan.sh check
 
 defaults:
   --dry-run is added unless you pass --no-dry-run
   --config defaults to ./config.yaml (override with SECSCAN_CONFIG env)
   image tag defaults to "secscan:latest" (override with SECSCAN_IMAGE env)
 
-secrets:
-  Driven by config.yaml's \`secrets.source\` field:
-    env        -> use GITHUB_TOKEN (and SLACK_*) already exported in your shell
-    1password  -> auto-wrap with \`op run --env-file=<env_file>\`
+secrets (driven by config.yaml):
+  secrets.source: env        -> use already-exported shell variables
+  secrets.source: 1password  -> auto-wrap with \`op run --env-file=<env_file>\`
+
+  GITHUB_TOKEN is always required.
+
+slack (driven by config.yaml):
+  slack.enabled: false       -> Slack is off; no extra env needed
+  slack.enabled: true with slack.webhook_url_env: "VAR"
+                             -> the named VAR (typically SLACK_WEBHOOK_URL) must be set
+  slack.enabled: true with slack.channel_id_env + slack.bot_token_env
+                             -> both named vars must be set (uses chat.postMessage)
+
+Run \`./secscan.sh check\` for a full setup status.
 EOF
     ;;
-  *) die "unknown command: $1 (try 'build' or 'run')" ;;
+  *) die "unknown command: $1 (try 'build', 'run', or 'check')" ;;
 esac

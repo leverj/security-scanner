@@ -12,13 +12,18 @@ of scope — another system owns that.
 ## Quick start
 
 ```bash
-# 1. Copy the example config
+# 1. Create the PARENT issue on your target GitHub repo and note its number.
+#    secscan files findings as sub-issues of THIS issue — it does not create the
+#    parent for you. Title it something like "Security findings (secscan)".
+
+# 2. Copy the example config
 cp config.example.yaml config.yaml
-$EDITOR config.yaml          # set repo, ref, parent_issue
+$EDITOR config.yaml          # set repo, ref, parent_issue (= the number from step 1)
 
-# 2. Set up secrets — pick ONE of the two paths below
+# 3. Set up secrets — pick ONE of the two paths in the next section
 
-# 3. Build and run
+# 4. Verify your setup, then run
+./secscan.sh check           # green checks across the board?
 ./secscan.sh build
 ./secscan.sh run             # defaults to --dry-run; add --no-dry-run to actually file issues
 ```
@@ -118,6 +123,39 @@ parsed back out, and any new finding whose fingerprint is already present is ski
 
 This means: once an issue is closed (fixed OR won't-fix), it never refiles. If you
 need re-surfacing of regressions, that's the external fixing system's concern.
+
+---
+
+## Troubleshooting
+
+`./secscan.sh check` reports the status of every prerequisite:
+
+```
+== config ==
+  ✓ /path/to/config.yaml
+== docker ==
+  ✓ docker is running
+== image ==
+  ✓ secscan:latest present              # ⚠ "not built yet" if you skipped `build`
+== secrets (1password) ==
+  ✓ op (1Password CLI) installed
+  ✓ op signed in
+  ✓ /path/to/.env.1password.tpl present
+== slack ==
+  · disabled                            # or "enabled — mode: webhook:SLACK_WEBHOOK_URL"
+```
+
+Common failure modes and what `check` says:
+
+| Symptom | Fix |
+|---|---|
+| `config not found` | `cp config.example.yaml config.yaml` |
+| `GITHUB_TOKEN unset` (env source) | `export GITHUB_TOKEN=…` or switch to `secrets.source: "1password"` |
+| `op not installed` (1Password source) | `brew install 1password-cli && op signin` |
+| `.env.1password.tpl missing` | `cp .env.1password.tpl.example .env.1password.tpl && $EDITOR …` |
+| `SLACK_… unset` (slack.enabled=true) | Either export the var, add it to the 1Password env file, or set `slack.enabled: false` |
+| `image not built yet` | `./secscan.sh build` |
+| `docker daemon not reachable` | Start Docker Desktop |
 
 ---
 
