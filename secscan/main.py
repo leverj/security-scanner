@@ -84,15 +84,20 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
             print(f"DRY-RUN: would sync {len(findings)} findings against parent #{cfg.parent_issue}", file=sys.stderr)
         result = sync(findings, gh, cfg.parent_issue, severity_floor=cfg.severity_floor, triage=triage)
 
-        # Slack digest (additive, never blocking).
+        # Slack digest (additive, never blocking). We hand it the ACTIONABLE
+        # findings (the ones we actually filed); notify._default_digest also
+        # reads result.created_findings as the canonical source.
         if cfg.slack.enabled:
             intro = (
-                triage.write_slack_intro(findings, result, cfg.repo, cfg.ref, cfg.parent_issue)
+                triage.write_slack_intro(
+                    result.created_findings, result, cfg.repo, cfg.ref, cfg.parent_issue
+                )
                 if (triage and triage.enabled)
                 else None
             )
             post_digest(
-                cfg.slack, findings, result, cfg.repo, cfg.ref, cfg.parent_issue, intro=intro
+                cfg.slack, result.created_findings, result,
+                cfg.repo, cfg.ref, cfg.parent_issue, intro=intro,
             )
 
         _print_summary(result, completed_scanners, failed, dry_run)

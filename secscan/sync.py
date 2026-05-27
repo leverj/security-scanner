@@ -28,10 +28,11 @@ class Triage(Protocol):
 
 @dataclass
 class SyncResult:
-    created: list[dict] = field(default_factory=list)         # the new issue dicts
-    skipped_dup: int = 0                                       # fingerprint already filed
-    skipped_fuzzy_dup: int = 0                                 # Gemma matched to an existing
-    skipped_floor: int = 0                                     # below severity_floor
+    created: list[dict] = field(default_factory=list)             # the new issue dicts
+    created_findings: list[Finding] = field(default_factory=list)  # the Finding behind each created issue
+    skipped_dup: int = 0                                           # fingerprint already filed
+    skipped_fuzzy_dup: int = 0                                     # Gemma matched to an existing
+    skipped_floor: int = 0                                         # below severity_floor
     total_findings: int = 0
 
 
@@ -118,6 +119,7 @@ def sync(
         issue = gh.create_issue(title, body, labels=_labels_for(f))
         gh.link_subissue(parent_issue, issue)
         result.created.append(issue)
+        result.created_findings.append(f)
         existing_fps.add(fp)
 
     return result

@@ -7,6 +7,7 @@ summary is computed by code; triage may override the prose if available.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 import requests
@@ -107,22 +108,37 @@ _PER_SECTION_LIMIT = 5  # show top N findings per category to keep messages skim
 def _default_digest(
     findings: list[Finding], result: SyncResult, repo: str, ref: str, parent_issue: int
 ) -> str:
-    """Slack mrkdwn-formatted digest. Per-category sections, top findings each,
-    overall severity breakdown footer.
+    """Slack mrkdwn digest of ACTIONABLE findings (newly filed this run).
 
-    Falls back to the old one-liner only when there are no findings AND nothing
-    was created (so a "you're clean" message isn't a wall of empty sections).
+    Per-category sections list only the findings that became open sub-issues
+    this run — items that were dup-skipped (already filed previously) or
+    below the severity floor aren't shown. The footer still reports the
+    skip counts so you can see the gates were applied, but the sections
+    themselves only contain new bugs to triage.
+
+    The `findings` parameter is accepted for backward compat but `result.created_findings`
+    is the source of truth — callers should populate it (sync.py does).
     """
+    _ = findings  # legacy positional; intentionally unused now
+    actionable: list[Finding] = list(result.created_findings)
+
     by_cat: dict[str, list[Finding]] = {}
     by_sev: dict[str, int] = {}
-    for f in findings:
+    for f in actionable:
         by_cat.setdefault(f.category, []).append(f)
         by_sev[f.severity] = by_sev.get(f.severity, 0) + 1
 
     lines: list[str] = [f":lock: *secscan* — `{repo}@{ref}` — parent #{parent_issue}"]
 
-    if not findings:
-        lines.append("_no findings above severity floor_")
+    if not actionable:
+        # Either truly clean OR everything was dup-skipped/below-floor.
+        if result.skipped_dup or result.skipped_floor:
+            lines.append(
+                f"_no new findings to triage_ "
+                f"({result.skipped_dup} already filed, {result.skipped_floor} below severity floor)"
+            )
+        else:
+            lines.append("_no findings_")
     else:
         for cat_key, emoji, label in _CATEGORY_SECTIONS:
             cat_findings = by_cat.get(cat_key) or []
@@ -136,7 +152,7 @@ def _default_digest(
             if len(cat_findings) > _PER_SECTION_LIMIT:
                 lines.append(f"  _…and {len(cat_findings) - _PER_SECTION_LIMIT} more_")
 
-    # Severity overall + create/dedup footer
+    # Severity overall + create/dedup footer (reflects ACTIONABLE counts).
     sev_parts = [f"{s}: {by_sev[s]}" for s in ("critical", "high", "medium", "low", "info") if by_sev.get(s)]
     if sev_parts:
         lines.append("")
@@ -148,18 +164,40 @@ def _default_digest(
     return "\n".join(lines)
 
 
+_OSV_PKG_RE = re.compile(r"Package ['`\"]([\w@/.+-]+?)(?:@([\d.\w+-]+))?['`\"]")
+
+
 def _one_liner(f: Finding) -> str:
-    """Compact per-finding line. Packs the most relevant fields per category."""
+    """Compact per-finding line. Packs the most relevant fields per category.
+
+    Avoids "X · X · …" repetition by suppressing the rule_id when the head
+    already equals (or contains) it.
+    """
     if f.category in ("dependency", "supply-chain"):
         pkg = f.extra.get("package") or ""
         ver = f.extra.get("installed_version") or ""
         eco = f.extra.get("ecosystem") or ""
         fixed = f.extra.get("fixed_versions") or []
-        head = f"{pkg}@{ver}" if pkg else f.rule_id
-        if eco:
+        # OSV-Scanner often leaves extras empty; recover pkg@ver from the message
+        # text ("Package 'activesupport@7.2.3' is vulnerable to ...").
+        if not pkg:
+            m = _OSV_PKG_RE.search(f.message or "")
+            if m:
+                pkg = m.group(1)
+                if not ver and m.group(2):
+                    ver = m.group(2)
+        head = f"{pkg}@{ver}" if (pkg and ver) else (pkg or "")
+        if eco and head:
             head = f"{head} ({eco})"
+        parts: list[str] = []
+        if head:
+            parts.append(head)
+        # Only print rule_id when head doesn't already encode it.
+        if f.rule_id and f.rule_id not in head:
+            parts.append(f"`{f.rule_id}`")
         fix_note = f"fixed in {fixed[0]}" if fixed else "no fix"
-        return f"{head} · `{f.rule_id}` · {fix_note}"
+        parts.append(fix_note)
+        return " · ".join(parts) if parts else (f.rule_id or "(unknown)")
     if f.category in ("secret", "secret-verified"):
         detector = f.extra.get("detector") or f.rule_id
         at = f"{f.file_path}:{f.line}" if f.line else f.file_path
