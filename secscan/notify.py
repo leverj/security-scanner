@@ -70,20 +70,95 @@ def _post_chat(token: str, channel: str, text: str) -> bool:
     return r.status_code < 300 and (r.json() or {}).get("ok") is True
 
 
+_SEV_EMOJI = {
+    "critical": ":red_circle:",
+    "high":     ":large_orange_circle:",
+    "medium":   ":large_yellow_circle:",
+    "low":      ":large_blue_circle:",
+    "info":     ":white_circle:",
+}
+
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+_CATEGORY_SECTIONS = [
+    # (category, emoji, label) — ordered by triage priority
+    ("secret-verified", ":key:",                "Secrets (verified live)"),
+    ("secret",          ":key:",                "Secrets"),
+    ("dependency",      ":shield:",             "Dependencies"),
+    ("iac",             ":building_construction:", "IaC misconfigurations"),
+    ("sast",            ":test_tube:",          "Code (SAST)"),
+    ("license",         ":page_with_curl:",     "License"),
+]
+
+_PER_SECTION_LIMIT = 5  # show top N findings per category to keep messages skimmable
+
+
 def _default_digest(
     findings: list[Finding], result: SyncResult, repo: str, ref: str, parent_issue: int
 ) -> str:
+    """Slack mrkdwn-formatted digest. Per-category sections, top findings each,
+    overall severity breakdown footer.
+
+    Falls back to the old one-liner only when there are no findings AND nothing
+    was created (so a "you're clean" message isn't a wall of empty sections).
+    """
+    by_cat: dict[str, list[Finding]] = {}
     by_sev: dict[str, int] = {}
     for f in findings:
+        by_cat.setdefault(f.category, []).append(f)
         by_sev[f.severity] = by_sev.get(f.severity, 0) + 1
-    parts = []
-    for s in ("critical", "high", "medium", "low", "info"):
-        if by_sev.get(s):
-            parts.append(f"{s}: {by_sev[s]}")
-    breakdown = " · ".join(parts) if parts else "no findings"
-    return (
-        f"*secscan* `{repo}@{ref}` parent #{parent_issue}\n"
-        f"{breakdown}\n"
-        f"created: {len(result.created)} · dup-skipped: {result.skipped_dup} "
-        f"· below-floor: {result.skipped_floor}"
+
+    lines: list[str] = [f":lock: *secscan* — `{repo}@{ref}` — parent #{parent_issue}"]
+
+    if not findings:
+        lines.append("_no findings above severity floor_")
+    else:
+        for cat_key, emoji, label in _CATEGORY_SECTIONS:
+            cat_findings = by_cat.get(cat_key) or []
+            if not cat_findings:
+                continue
+            cat_findings.sort(key=lambda f: (_SEV_RANK.get(f.severity, 99), f.title))
+            lines.append("")
+            lines.append(f"{emoji} *{label}* ({len(cat_findings)})")
+            for f in cat_findings[:_PER_SECTION_LIMIT]:
+                lines.append(f"  {_SEV_EMOJI.get(f.severity, '•')} *{f.severity}* — {_one_liner(f)}")
+            if len(cat_findings) > _PER_SECTION_LIMIT:
+                lines.append(f"  _…and {len(cat_findings) - _PER_SECTION_LIMIT} more_")
+
+    # Severity overall + create/dedup footer
+    sev_parts = [f"{s}: {by_sev[s]}" for s in ("critical", "high", "medium", "low", "info") if by_sev.get(s)]
+    if sev_parts:
+        lines.append("")
+        lines.append(":bar_chart: " + " · ".join(sev_parts))
+    lines.append(
+        f":card_index_dividers: filed {len(result.created)} · "
+        f"dup-skipped {result.skipped_dup} · below-floor {result.skipped_floor}"
     )
+    return "\n".join(lines)
+
+
+def _one_liner(f: Finding) -> str:
+    """Compact per-finding line. Packs the most relevant fields per category."""
+    if f.category in ("dependency", "supply-chain"):
+        pkg = f.extra.get("package") or ""
+        ver = f.extra.get("installed_version") or ""
+        eco = f.extra.get("ecosystem") or ""
+        fixed = f.extra.get("fixed_versions") or []
+        head = f"{pkg}@{ver}" if pkg else f.rule_id
+        if eco:
+            head = f"{head} ({eco})"
+        fix_note = f"fixed in {fixed[0]}" if fixed else "no fix"
+        return f"{head} · `{f.rule_id}` · {fix_note}"
+    if f.category in ("secret", "secret-verified"):
+        detector = f.extra.get("detector") or f.rule_id
+        at = f"{f.file_path}:{f.line}" if f.line else f.file_path
+        suffix = " *(VERIFIED LIVE)*" if f.extra.get("verified") else ""
+        return f"{detector} · {at}{suffix}"
+    if f.category == "iac":
+        at = f"{f.file_path}:{f.line}" if f.line else f.file_path
+        return f"{f.rule_id} · {at}"
+    if f.category == "license":
+        return f"{f.rule_id} · {f.file_path}"
+    # sast / fallback
+    at = f"{f.file_path}:{f.line}" if f.line else f.file_path
+    return f"{f.rule_id} · {at}"

@@ -52,8 +52,50 @@ def test_default_digest_includes_severity_breakdown():
     text = _default_digest(findings, SyncResult(created=[{}, {}], skipped_dup=1), "o/n", "main", 9)
     assert "high: 2" in text
     assert "low: 1" in text
-    assert "created: 2" in text
-    assert "dup-skipped: 1" in text
+    assert "filed 2" in text
+    assert "dup-skipped 1" in text
+    # New format: must have category section + severity emoji.
+    assert ":test_tube:" in text          # SAST category emoji
+    assert ":large_orange_circle:" in text  # high-severity emoji
+
+
+def test_default_digest_no_findings():
+    text = _default_digest([], SyncResult(), "o/n", "main", 9)
+    assert "no findings" in text
+    assert "filed 0" in text
+
+
+def test_default_digest_groups_by_category():
+    from secscan.models import Finding
+    findings = [
+        Finding("trivy", "dependency", "CVE-2024-1", "critical", "package-lock.json", 1, "t", "m",
+                extra={"package": "left-pad", "installed_version": "1.0.0",
+                       "ecosystem": "npm", "fixed_versions": ["1.3.0"]}),
+        Finding("trufflehog", "secret-verified", "trufflehog/GitHub/verified", "critical",
+                "src/config.js", 42, "t", "m",
+                extra={"detector": "GitHub", "verified": True}),
+        Finding("trivy", "iac", "AVD-DS-0002", "medium", "Dockerfile", 1, "t", "m"),
+    ]
+    text = _default_digest(findings, SyncResult(created=findings), "o/n", "main", 9)
+    # Each category gets its own section.
+    assert "Dependencies" in text
+    assert "Secrets (verified live)" in text
+    assert "IaC misconfigurations" in text
+    # Dependency one-liner shows package + fix info.
+    assert "left-pad@1.0.0" in text
+    assert "fixed in 1.3.0" in text
+    # Verified-live secret is annotated.
+    assert "VERIFIED LIVE" in text
+
+
+def test_default_digest_caps_per_section():
+    from secscan.models import Finding
+    findings = [
+        Finding("semgrep", "sast", f"rule-{i}", "medium", "f.js", i, f"t{i}", "m")
+        for i in range(10)
+    ]
+    text = _default_digest(findings, SyncResult(), "o/n", "main", 9)
+    assert "and 5 more" in text  # cap = 5 per section
 
 
 def test_failure_is_non_blocking(monkeypatch):
