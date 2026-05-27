@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+build/
+dist/
+.coverage
+htmlcov/
+work/
+/tmp_*
+
+# Per-deployment config (use config.example.yaml as the template; keep secrets out of git)
+config.yaml
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store

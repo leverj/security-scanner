@@ -1,0 +1,35 @@
+# secscan config — mount read-only at /config/config.yaml inside the container.
+# Secrets (token, Slack creds) come from env vars referenced by *_env keys below,
+# never from this file.
+
+repo: "leverj/ezel"
+ref: "dev"
+parent_issue: 451
+github_token_env: "GITHUB_TOKEN"
+
+scanners:
+  osv: true
+  gitleaks: true
+  semgrep: true
+
+paths:
+  exclude:
+    - "archive/"
+    - "vendor/"
+    - ".github/scripts/"
+
+severity_floor: "low"   # info | low | medium | high | critical
+
+triage:
+  enabled: false
+  provider: "ollama"
+  model: "gemma4:26b"
+  base_url: "http://host.docker.internal:11434"
+  keep_alive: "5m"
+
+slack:
+  enabled: false
+  webhook_url_env: "SLACK_WEBHOOK_URL"
+  # OR for chat.postMessage:
+  # channel_id_env: "SLACK_CHANNEL_ID"
+  # bot_token_env: "SLACK_BOT_TOKEN"

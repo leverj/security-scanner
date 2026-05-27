@@ -1,0 +1,93 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "osv-scanner",
+          "version": "1.7.0",
+          "informationUri": "https://github.com/google/osv-scanner",
+          "rules": [
+            {
+              "id": "GHSA-aaaa-aaaa-aaaa",
+              "name": "GHSA-aaaa-aaaa-aaaa",
+              "shortDescription": {
+                "text": "Prototype pollution in lodash"
+              },
+              "fullDescription": {
+                "text": "Versions of lodash prior to 4.17.21 are vulnerable to Prototype Pollution."
+              },
+              "properties": {
+                "security-severity": "9.8",
+                "ecosystem": "npm",
+                "package": "lodash",
+                "installed_version": "4.17.15",
+                "fixed_versions": ["4.17.21"],
+                "aliases": ["CVE-2021-23337"]
+              }
+            },
+            {
+              "id": "GHSA-bbbb-bbbb-bbbb",
+              "name": "GHSA-bbbb-bbbb-bbbb",
+              "shortDescription": {
+                "text": "Regular expression denial of service in semver"
+              },
+              "fullDescription": {
+                "text": "semver before 7.5.2 is vulnerable to ReDoS."
+              },
+              "properties": {
+                "security-severity": "5.3",
+                "ecosystem": "npm",
+                "package": "semver",
+                "installed_version": "7.3.5",
+                "fixed_versions": ["7.5.2"],
+                "aliases": ["CVE-2022-25883"]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GHSA-aaaa-aaaa-aaaa",
+          "level": "error",
+          "message": {
+            "text": "Package lodash@4.17.15 is vulnerable to GHSA-aaaa-aaaa-aaaa (CVE-2021-23337): Prototype pollution. Upgrade to 4.17.21."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package-lock.json"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GHSA-bbbb-bbbb-bbbb",
+          "level": "warning",
+          "message": {
+            "text": "Package semver@7.3.5 is vulnerable to GHSA-bbbb-bbbb-bbbb (CVE-2022-25883): ReDoS. Upgrade to 7.5.2."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "frontend/package-lock.json"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

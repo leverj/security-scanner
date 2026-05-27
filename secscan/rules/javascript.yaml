@@ -1,0 +1,89 @@
+rules:
+  - id: js.eval-on-user-input
+    message: |
+      `eval` (or `Function(...)`) on user-controlled input enables remote code execution.
+      Replace with a parser appropriate to the data (JSON.parse, a small DSL, etc).
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+      security-severity: "9.0"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: Function($X)
+          - pattern: new Function($X)
+
+  - id: js.child-process-shell
+    message: |
+      `exec`/`execSync` runs through a shell — variable interpolation here enables command injection.
+      Use `execFile`/`spawn` with an args array, or sanitize via `shell-quote`.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      security-severity: "8.6"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: child_process.exec($X, ...)
+          - pattern: child_process.execSync($X, ...)
+          - pattern: exec($X, ...)
+          - pattern: execSync($X, ...)
+      - pattern-not: child_process.exec("...", ...)
+      - pattern-not: child_process.execSync("...", ...)
+      - pattern-not: exec("...", ...)
+      - pattern-not: execSync("...", ...)
+
+  - id: js.unsafe-regex-from-input
+    message: |
+      RegExp built from user input is a ReDoS vector. Use a fixed pattern or escape input first.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-1333: Inefficient Regular Expression Complexity"
+      security-severity: "5.3"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: new RegExp($X, ...)
+          - pattern: RegExp($X, ...)
+      - pattern-not: new RegExp("...", ...)
+      - pattern-not: RegExp("...", ...)
+
+  - id: js.innerhtml-assign
+    message: |
+      Assigning to `innerHTML` with non-constant content enables DOM XSS. Use `textContent` or a
+      sanitization library (DOMPurify) for untrusted HTML.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "6.1"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: $EL.innerHTML = $X
+      - pattern-not: $EL.innerHTML = "..."
+
+  - id: js.weak-random-for-token
+    message: |
+      `Math.random()` is not cryptographically secure. For tokens, IDs, or secrets use
+      `crypto.randomBytes`/`crypto.getRandomValues` instead.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-338: Use of Cryptographically Weak Pseudo-Random Number Generator"
+      security-severity: "5.3"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $TOK = Math.random()
+          - pattern: |
+              const $TOK = Math.random()
+          - pattern: |
+              let $TOK = Math.random()
+      - metavariable-regex:
+          metavariable: $TOK
+          regex: "(?i).*(token|secret|key|password|nonce|otp).*"

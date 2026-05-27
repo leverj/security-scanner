@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secscan"
+version = "0.1.0"
+description = "Stateless single-repo security scanner that files findings as GitHub sub-issues"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+secscan = "secscan.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["secscan*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+secscan = ["rules/**/*.yaml", "rules/**/*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]
