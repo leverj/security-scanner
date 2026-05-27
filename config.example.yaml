@@ -55,6 +55,12 @@ triage:
   # model never blocks Slack delivery. If we can't get an intro in this window
   # we post the structured digest without one.
   intro_timeout: 120
+  # Granular feature toggles. The intro is cheap (1 call total); prose and
+  # fuzzy-dup each cost ~1 chat call PER new finding. Turn them on only when
+  # you have a small backlog or a fast model.
+  intro_enabled: true
+  prose_enabled: false       # if true: Gemma rewrites every new issue's body
+  fuzzy_dup_enabled: false   # if true: Gemma cross-matches each new finding to existing
 
 slack:
   enabled: false

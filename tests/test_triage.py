@@ -40,6 +40,34 @@ def test_disabled_triage_does_not_call_ollama():
     assert "Scanner" in body
 
 
+def test_write_issue_skipped_when_prose_disabled():
+    """The expensive per-finding prose path must respect its own flag, not just
+    the master `enabled` toggle."""
+    t = Triage(TriageConfig(enabled=True, prose_enabled=False, prewarm=False))
+    with patch.object(t._session, "post") as p:
+        title, body = t.write_issue(_f())
+    # Deterministic body, no chat call.
+    assert "Scanner" in body
+    p.assert_not_called()
+
+
+def test_fuzzy_dup_skipped_when_disabled():
+    t = Triage(TriageConfig(enabled=True, fuzzy_dup_enabled=False, prewarm=False))
+    with patch.object(t._session, "post") as p:
+        # Even with a markered existing issue and triage.enabled, fuzzy_dup is off.
+        assert t.is_duplicate_of_existing(_f(), [_existing()]) is False
+    p.assert_not_called()
+
+
+def test_intro_skipped_when_intro_disabled():
+    from secscan.sync import SyncResult
+    t = Triage(TriageConfig(enabled=True, intro_enabled=False, prewarm=False))
+    with patch.object(t._session, "post") as p:
+        text = t.write_slack_intro([_f()], SyncResult(), "o/n", "main", 9)
+    assert text is None
+    p.assert_not_called()
+
+
 def test_unreachable_ollama_falls_back(monkeypatch):
     t = Triage(TriageConfig(enabled=True))
     with patch.object(t._session, "get", side_effect=requests.ConnectionError("down")):
@@ -54,28 +82,28 @@ def _existing():
 
 
 def test_fuzzy_dup_yes_returns_true():
-    t = Triage(TriageConfig(enabled=True))
+    t = Triage(TriageConfig(enabled=True, fuzzy_dup_enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response({"duplicate_of": 7, "confidence": "high"})):
         assert t.is_duplicate_of_existing(_f(), [_existing()]) is True
 
 
 def test_fuzzy_dup_low_confidence_returns_false():
-    t = Triage(TriageConfig(enabled=True))
+    t = Triage(TriageConfig(enabled=True, fuzzy_dup_enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response({"duplicate_of": 7, "confidence": "low"})):
         assert t.is_duplicate_of_existing(_f(), [_existing()]) is False
 
 
 def test_fuzzy_dup_malformed_json_returns_false():
-    t = Triage(TriageConfig(enabled=True))
+    t = Triage(TriageConfig(enabled=True, fuzzy_dup_enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response("not json")):
         assert t.is_duplicate_of_existing(_f(), [_existing()]) is False
 
 
 def test_write_issue_uses_model_prose():
-    t = Triage(TriageConfig(enabled=True))
+    t = Triage(TriageConfig(enabled=True, prose_enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response({"title": "T", "body": "B"})):
         title, body = t.write_issue(_f())
@@ -83,7 +111,7 @@ def test_write_issue_uses_model_prose():
 
 
 def test_write_issue_falls_back_on_missing_keys():
-    t = Triage(TriageConfig(enabled=True))
+    t = Triage(TriageConfig(enabled=True, prose_enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response({"title": "T"})):
         title, body = t.write_issue(_f())

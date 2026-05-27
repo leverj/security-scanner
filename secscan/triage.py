@@ -97,7 +97,9 @@ class Triage:
         """Ask the model whether `f` is a renamed/moved version of any existing issue.
         Returns False on any error so the deterministic path always proceeds.
         """
-        if not self.enabled or not existing:
+        if not self.enabled or not getattr(self.cfg, "fuzzy_dup_enabled", False):
+            return False
+        if not existing:
             return False
         if not self._ensure_reachable():
             return False
@@ -126,8 +128,14 @@ class Triage:
         return bool(dup) and conf == "high"
 
     def write_issue(self, f: Finding) -> tuple[str, str]:
-        """Draft an issue title + body. Falls back to deterministic templating on error."""
-        if not self.enabled or not self._ensure_reachable():
+        """Draft an issue title + body. Falls back to deterministic templating on error.
+
+        Honors `triage.prose_enabled`: disabled by default since it costs ~1
+        chat call per new finding, which dominates the run cost for big scans.
+        """
+        if not self.enabled or not getattr(self.cfg, "prose_enabled", False):
+            return default_issue(f)
+        if not self._ensure_reachable():
             return default_issue(f)
 
         prompt = (
@@ -157,7 +165,9 @@ class Triage:
         the deterministic per-category digest. If the model isn't warm in time,
         return None — the structured digest still posts without the prose.
         """
-        if not self.enabled or not self._ensure_reachable():
+        if not self.enabled or not getattr(self.cfg, "intro_enabled", True):
+            return None
+        if not self._ensure_reachable():
             return None
         # Wait briefly for the background warm-up to finish. We've capped this
         # via `intro_timeout` so a slow model never blocks Slack delivery for

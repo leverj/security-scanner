@@ -53,6 +53,19 @@ class TriageConfig:
     # shorter than `timeout`: if Gemma can't produce a one-liner in this window
     # we skip the intro and post the structured digest without it. Default 120s.
     intro_timeout: int = 120
+    # Granular feature flags. Each defaults to a sensible value so flipping
+    # `enabled: true` doesn't accidentally explode runtime.
+    #
+    #   intro      — one short Gemma-written sentence prepended to the Slack
+    #                digest. Cheap: 1 chat call at the end of the run.
+    #   prose      — Gemma rewrites issue title/body for each NEW finding.
+    #                Expensive: 1 chat call per new finding. Off by default.
+    #   fuzzy_dup  — Gemma decides whether a new finding is a fuzzy match for
+    #                an existing issue at a different path/name. Expensive:
+    #                1 chat call per new (post-fp-dedup) finding. Off by default.
+    intro_enabled: bool = True
+    prose_enabled: bool = False
+    fuzzy_dup_enabled: bool = False
 
 
 @dataclass
@@ -150,6 +163,9 @@ def _from_dict(raw: dict) -> Config:
         timeout=triage_timeout,
         prewarm=bool(triage_raw.get("prewarm", True)),
         intro_timeout=intro_timeout,
+        intro_enabled=bool(triage_raw.get("intro_enabled", True)),
+        prose_enabled=bool(triage_raw.get("prose_enabled", False)),
+        fuzzy_dup_enabled=bool(triage_raw.get("fuzzy_dup_enabled", False)),
     )
 
     slack_raw = raw.get("slack") or {}
