@@ -24,13 +24,17 @@ def run(root: Path, binary: str = "gitleaks") -> RunnerResult:
     except Exception as e:
         return RunnerResult("gitleaks", None, False, f"{type(e).__name__}: {e}")
 
-    # rc 0 = no secrets, rc 77 = secrets found (both success); anything else = failure.
-    if rc not in (0, 77):
-        return RunnerResult("gitleaks", None, False, f"exit {rc}: {stderr.strip()[:200]}")
-
+    # Gitleaks exit codes are version-dependent:
+    #   v7 and earlier: 0 = no leaks, 77 = leaks found
+    #   v8+:            0 = no leaks, 1 = leaks found  (configurable via --exit-code)
+    # The deciding question is "did the scanner produce parseable SARIF?", not the
+    # exit code. Try to parse stdout first; if it parses, treat as success regardless
+    # of rc. Only fall back to "failed" when both stdout is unparseable AND rc != 0.
     try:
         sarif = json.loads(stdout)
-    except (json.JSONDecodeError, ValueError) as e:
-        return RunnerResult("gitleaks", None, False, f"parse error: {e}")
-
-    return RunnerResult("gitleaks", sarif, True, None)
+        return RunnerResult("gitleaks", sarif, True, None)
+    except (json.JSONDecodeError, ValueError) as parse_err:
+        if rc == 0:
+            # Empty/no-output success is still a failure to produce SARIF.
+            return RunnerResult("gitleaks", None, False, f"parse error: {parse_err}")
+        return RunnerResult("gitleaks", None, False, f"exit {rc}: {stderr.strip()[:200]}")

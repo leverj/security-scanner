@@ -196,15 +196,15 @@ def test_runner_subprocess_cwd_is_set(module, kwargs, tmp_path: Path):
 
 # --- osv-specific: excludes wired in ----------------------------------------
 
-def test_osv_passes_paths_to_ignore(tmp_path: Path):
+def test_osv_does_not_pass_paths_to_ignore(tmp_path: Path):
+    """osv-scanner's exclude flag name varies by version (and is unsupported on
+    1.9.2). We rely on post-hoc filtering in normalize.py instead — assert the
+    flag is never passed even when excludes are configured."""
     with patch("secscan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
         osv_runner.run(tmp_path, exclude=["vendor/", "archive/"])
     cmd = m.call_args.args[0]
-    # one --paths-to-ignore per exclude
-    assert cmd.count("--paths-to-ignore") == 2
-    assert "vendor/" in cmd
-    assert "archive/" in cmd
+    assert "--paths-to-ignore" not in cmd
     assert "--skip-git" in cmd
     assert "--recursive" in cmd
 
@@ -235,3 +235,25 @@ def test_gitleaks_reports_to_stdout(tmp_path: Path):
     assert "--report-path" in cmd
     # stdout sentinel
     assert "-" in cmd
+
+
+# --- gitleaks-specific: version-dependent exit codes ------------------------
+
+@pytest.mark.parametrize("rc", [0, 1, 77])
+def test_gitleaks_accepts_any_exit_code_when_sarif_parses(rc, tmp_path: Path):
+    """v7 used rc=77 for "leaks found"; v8 uses rc=1. We trust the SARIF parse,
+    not the exit code: if stdout is valid SARIF the run was successful."""
+    with patch("secscan.runners.subprocess.run") as m:
+        m.return_value = _fake_completed(rc, TINY_SARIF_JSON, "")
+        result = gitleaks_runner.run(tmp_path)
+    assert result.completed is True
+    assert result.sarif == TINY_SARIF
+
+
+def test_gitleaks_non_zero_with_unparseable_stdout_is_failure(tmp_path: Path):
+    """A genuinely failed gitleaks run still gets reported as a failure."""
+    with patch("secscan.runners.subprocess.run") as m:
+        m.return_value = _fake_completed(1, "not sarif", "config error")
+        result = gitleaks_runner.run(tmp_path)
+    assert result.completed is False
+    assert "exit 1" in (result.error or "")

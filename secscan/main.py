@@ -167,19 +167,35 @@ def _absorb(
 def _resolve_semgrep_rules(cfg: Config) -> Path | str | None:
     """Resolve the Semgrep rules dir/config. Order:
       1. cfg.semgrep_rules_dir (explicit path)
-      2. /rules (Docker mount per spec §11)
+      2. /rules (Docker mount per spec §11) — only if non-empty
       3. <package>/rules (bundled, when installed editable)
       4. "auto" — Semgrep's hosted rule pack (last resort; needs network)
+
+    The /rules check requires actual content: Docker's VOLUME declaration creates
+    an empty mountpoint when nothing is bind-mounted, which would otherwise mask
+    the bundled rules and produce a confusing semgrep "no rules" exit 7.
     """
     if cfg.semgrep_rules_dir:
         return cfg.semgrep_rules_dir
-    if Path("/rules").is_dir():
-        return Path("/rules")
+    mount = Path("/rules")
+    if mount.is_dir() and _has_rule_files(mount):
+        return mount
     bundled = Path(__file__).parent / "rules"
-    if bundled.is_dir() and any(bundled.iterdir()):
+    if bundled.is_dir() and _has_rule_files(bundled):
         return bundled
     # Last resort: Semgrep's hosted registry (only useful if the container has network)
     return "auto"
+
+
+def _has_rule_files(d: Path) -> bool:
+    """True iff `d` contains at least one *.yaml / *.yml / *.json file (semgrep rule formats)."""
+    try:
+        for p in d.rglob("*"):
+            if p.is_file() and p.suffix.lower() in (".yaml", ".yml", ".json"):
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def _maybe_triage(cfg: Config):
