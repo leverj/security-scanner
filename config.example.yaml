@@ -1,11 +1,21 @@
 # secscan config — mount read-only at /config/config.yaml inside the container.
 # Secrets (token, Slack creds) come from env vars referenced by *_env keys below,
 # never from this file.
+#
+# The `secrets:` block below tells ./secscan.sh how to populate those env vars
+# before invoking the container. Python code reads only os.environ, regardless.
 
 repo: "leverj/ezel"
 ref: "dev"
 parent_issue: 451
 github_token_env: "GITHUB_TOKEN"
+
+# How ./secscan.sh sources the env vars named in *_env keys above.
+#   source: env         -> assume GITHUB_TOKEN (etc.) are already exported in your shell
+#   source: 1password   -> auto-prefix with `op run --env-file=<env_file>`
+secrets:
+  source: "env"           # "env" | "1password"
+  env_file: ".env.1password.tpl"   # used only when source == "1password"
 
 scanners:
   osv: true
