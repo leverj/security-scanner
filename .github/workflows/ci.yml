@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Run the JavaScript actions on Node 24 today — Node 20 is being removed from
+  # runners on 2026-09-16. Forced-default begins 2026-06-02.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test:
     runs-on: ubuntu-latest
