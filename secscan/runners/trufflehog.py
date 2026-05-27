@@ -19,17 +19,19 @@ _JSONL_WRAPPER_KEY = "_trufflehog_jsonl"
 
 
 def run(root: Path, exclude: list[str] | None = None, binary: str = "trufflehog") -> RunnerResult:
+    # NOTE: Trufflehog v3 has no flag for inline glob excludes (only
+    # `--exclude-paths <file>` taking a path to a patterns file). Rather than
+    # write a tempfile, we let trufflehog scan the whole tree and let
+    # normalize._normalize_trufflehog filter excluded paths post-hoc.
+    _ = exclude
     cmd = [
         binary,
         "filesystem",
         "--json",
         "--no-update",            # don't phone home to check for updates
         "--no-verification-cache",  # always verify fresh (no false-negatives from cache)
+        str(root),
     ]
-    # Trufflehog respects path excludes via --exclude-globs.
-    for pat in exclude or []:
-        cmd += ["--exclude-globs", pat.rstrip("/") + "/**" if pat.endswith("/") else pat]
-    cmd.append(str(root))
 
     try:
         rc, stdout, stderr = _run(cmd, cwd=root)

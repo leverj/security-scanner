@@ -42,12 +42,17 @@ class TriageConfig:
     base_url: str = "http://host.docker.internal:11434"
     keep_alive: str = "5m"
     # Cold-start of a ~17 GB Gemma model can take several minutes the first time
-    # the day. Subsequent calls are fast thanks to keep_alive. 600s tolerates the
-    # cold case; keep_alive amortizes it across the rest of the run.
+    # of the day. Subsequent calls are fast thanks to keep_alive. 600s tolerates
+    # the cold case for fuzzy-dedup + prose generation.
     timeout: int = 600
-    # If True, send a tiny prompt up front so the slow load happens before any
-    # timed inference call. Strongly recommended for large models.
+    # If True, kick off a model-warming request in a BACKGROUND thread when
+    # Triage is constructed. Scans run while the model loads; by the time we
+    # need the Slack intro the model is hot. Strongly recommended for large models.
     prewarm: bool = True
+    # Intro generation runs at the end of the pipeline. Cap it separately and
+    # shorter than `timeout`: if Gemma can't produce a one-liner in this window
+    # we skip the intro and post the structured digest without it. Default 120s.
+    intro_timeout: int = 120
 
 
 @dataclass
@@ -132,6 +137,10 @@ def _from_dict(raw: dict) -> Config:
         triage_timeout = int(triage_raw.get("timeout") or 600)
     except (TypeError, ValueError):
         triage_timeout = 600
+    try:
+        intro_timeout = int(triage_raw.get("intro_timeout") or 120)
+    except (TypeError, ValueError):
+        intro_timeout = 120
     triage = TriageConfig(
         enabled=bool(triage_raw.get("enabled", False)),
         provider=str(triage_raw.get("provider") or "ollama"),
@@ -140,6 +149,7 @@ def _from_dict(raw: dict) -> Config:
         keep_alive=str(triage_raw.get("keep_alive") or "5m"),
         timeout=triage_timeout,
         prewarm=bool(triage_raw.get("prewarm", True)),
+        intro_timeout=intro_timeout,
     )
 
     slack_raw = raw.get("slack") or {}

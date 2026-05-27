@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 
 import requests
 
@@ -33,9 +34,62 @@ class Triage:
         self.cfg = cfg
         self.enabled = cfg.enabled
         self._timeout = max(60, int(getattr(cfg, "timeout", 600)))
+        self._intro_timeout = max(30, int(getattr(cfg, "intro_timeout", 120)))
         self._session = requests.Session()
         self._reachable: bool | None = None  # lazy probe
         self._warmed: bool = False  # set once a successful chat has loaded the model
+        self._prewarm_thread: threading.Thread | None = None
+
+    def start_warmup(self) -> None:
+        """Explicitly kick off a background model-warming thread. Called by
+        main.py at the start of a run so the model loads while scans execute.
+        Tests don't call this — they construct Triage and patch its session
+        without firing real HTTP."""
+        if not self.enabled or not getattr(self.cfg, "prewarm", True):
+            return
+        if self._prewarm_thread is not None:
+            return
+        self._kick_off_background_prewarm()
+
+    def _kick_off_background_prewarm(self) -> None:
+        """Start the slow model-load in a daemon thread immediately.
+
+        Scans run while the model warms up; by the time the run reaches
+        write_slack_intro() (the only Gemma call most users actually make), the
+        model is loaded and inference is fast. The thread is daemon so it
+        doesn't keep the process alive on its own.
+        """
+        def _target():
+            try:
+                # Probe reachability first (cheap), then warm.
+                r = self._session.get(
+                    f"{self.cfg.base_url.rstrip('/')}/api/tags", timeout=5
+                )
+                if r.status_code >= 500:
+                    return
+                self._reachable = True
+                print(
+                    f"triage: warming {self.cfg.model} in background "
+                    f"(scans will continue in parallel)…",
+                    file=sys.stderr,
+                )
+                self._session.post(
+                    f"{self.cfg.base_url.rstrip('/')}/api/chat",
+                    json={
+                        "model": self.cfg.model,
+                        "messages": [{"role": "user", "content": "ready?"}],
+                        "stream": False,
+                        "keep_alive": self.cfg.keep_alive,
+                    },
+                    timeout=self._timeout,
+                )
+                self._warmed = True
+                print("triage: model warm", file=sys.stderr)
+            except requests.RequestException as e:
+                print(f"triage: background warm-up failed: {e}", file=sys.stderr)
+
+        self._prewarm_thread = threading.Thread(target=_target, daemon=True)
+        self._prewarm_thread.start()
 
     # ---- public API used by sync.py -----------------------------------------
 
@@ -99,16 +153,25 @@ class Triage:
     def write_slack_intro(
         self, findings: list[Finding], result: SyncResult, repo: str, ref: str, parent_issue: int
     ) -> str | None:
-        """Generate ONLY a one-line, human-tone summary line that the notifier
-        prepends to the deterministic per-category digest.
-
-        The deterministic digest already provides structure (sections per
-        category, top-N findings each, severity totals); the LLM's job is just
-        to add a one-sentence framing. Returns None on any error so the digest
-        renders structurally without the prose intro.
+        """Generate a one-sentence framing line that the notifier prepends to
+        the deterministic per-category digest. If the model isn't warm in time,
+        return None — the structured digest still posts without the prose.
         """
         if not self.enabled or not self._ensure_reachable():
             return None
+        # Wait briefly for the background warm-up to finish. We've capped this
+        # via `intro_timeout` so a slow model never blocks Slack delivery for
+        # the whole `timeout` budget. Use most of intro_timeout for warm-up and
+        # leave a small inference budget afterwards.
+        warmup_budget = max(15, self._intro_timeout - 15)
+        if not self._wait_for_warmup(warmup_budget):
+            print(
+                f"triage: model still warming after {warmup_budget}s; "
+                "skipping Slack intro for this run",
+                file=sys.stderr,
+            )
+            return None
+
         summary = {
             "repo": repo,
             "ref": ref,
@@ -126,13 +189,13 @@ class Triage:
             "If the run was clean, say so.\n\n"
             f"{json.dumps(summary, indent=2)}"
         )
+        # Use the shorter intro_timeout for inference too.
         try:
-            text = self._chat_text(prompt)
+            text = self._chat_text(prompt, timeout=15)
         except Exception as e:
             print(f"triage: slack intro chat failed: {e}", file=sys.stderr)
             return None
         text = (text or "").strip()
-        # Defensive: drop any model-emitted JSON braces / markdown fences.
         if text.startswith("{") or text.startswith("```"):
             return None
         return text.split("\n")[0][:200] if text else None
@@ -143,6 +206,9 @@ class Triage:
     # ---- internals ----------------------------------------------------------
 
     def _ensure_reachable(self) -> bool:
+        """Cheap reachability check. The actual model warm-up is done in a
+        background thread started from __init__, so this never blocks on the
+        slow model load."""
         if self._reachable is not None:
             return self._reachable
         try:
@@ -151,40 +217,17 @@ class Triage:
         except requests.RequestException:
             self._reachable = False
             print(f"triage: Ollama unreachable at {self.cfg.base_url}", file=sys.stderr)
-        if self._reachable and getattr(self.cfg, "prewarm", True) and not self._warmed:
-            self._prewarm()
         return self._reachable
 
-    def _prewarm(self) -> None:
-        """Load the model into memory before any timed inference call. A ~17 GB
-        Gemma model can take a minute or two to load the first time today; doing
-        it explicitly with a no-op prompt amortizes the cost out of the first
-        real call (which would otherwise hit the configured timeout)."""
-        try:
-            print(
-                f"triage: pre-warming {self.cfg.model} at {self.cfg.base_url} "
-                f"(this may take a minute on first run)…",
-                file=sys.stderr,
-            )
-            self._session.post(
-                f"{self.cfg.base_url.rstrip('/')}/api/chat",
-                json={
-                    "model": self.cfg.model,
-                    "messages": [{"role": "user", "content": "ready?"}],
-                    "stream": False,
-                    "keep_alive": self.cfg.keep_alive,
-                },
-                timeout=self._timeout,
-            )
-            self._warmed = True
-            print("triage: model ready", file=sys.stderr)
-        except requests.RequestException as e:
-            print(
-                f"triage: pre-warm failed ({e}); triage will be skipped for this run",
-                file=sys.stderr,
-            )
-            # Don't flip _reachable=False here — let downstream calls also try; one
-            # of them might succeed.
+    def _wait_for_warmup(self, max_wait: int) -> bool:
+        """Block up to `max_wait` seconds for the background warm-up to finish.
+        Returns True if warm (or already warm); False on timeout."""
+        if self._warmed:
+            return True
+        if self._prewarm_thread is None:
+            return True  # caller didn't enable prewarm
+        self._prewarm_thread.join(timeout=max_wait)
+        return self._warmed
 
     def _chat_json(self, user_prompt: str) -> object:
         """POST /api/chat with format=json so Ollama returns parseable JSON."""
@@ -207,7 +250,7 @@ class Triage:
         except json.JSONDecodeError:
             return None
 
-    def _chat_text(self, user_prompt: str) -> str:
+    def _chat_text(self, user_prompt: str, timeout: int | None = None) -> str:
         r = self._session.post(
             f"{self.cfg.base_url.rstrip('/')}/api/chat",
             json={
@@ -216,7 +259,7 @@ class Triage:
                 "stream": False,
                 "keep_alive": self.cfg.keep_alive,
             },
-            timeout=self._timeout,
+            timeout=timeout if timeout is not None else self._timeout,
         )
         r.raise_for_status()
         return ((r.json() or {}).get("message") or {}).get("content") or ""

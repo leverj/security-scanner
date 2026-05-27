@@ -243,7 +243,10 @@ def _maybe_triage(cfg: Config):
     try:
         # Lazy import to avoid touching `requests` when triage is off.
         from secscan.triage import Triage
-        return Triage(cfg.triage)
+        t = Triage(cfg.triage)
+        # Kick off model warm-up in the background; scans run in parallel.
+        t.start_warmup()
+        return t
     except Exception as e:
         print(f"triage: disabled ({e})", file=sys.stderr)
         return None

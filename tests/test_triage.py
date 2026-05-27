@@ -128,13 +128,18 @@ def test_triage_timeout_is_configurable_and_clamped():
     assert t2._timeout >= 60
 
 
-def test_prewarm_fires_on_first_reachable_check():
+def test_start_warmup_kicks_off_background_thread():
+    """start_warmup runs the model load in a daemon thread that doesn't block
+    the caller. The thread issues a 'ready?' chat POST so the model loads."""
     t = Triage(TriageConfig(enabled=True, prewarm=True))
     post_calls = []
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", side_effect=lambda *a, **kw: post_calls.append(kw) or _gemma_response("ok")):
-        assert t._ensure_reachable() is True
-    assert post_calls  # at least one POST = the prewarm
+        t.start_warmup()
+        # The thread must exist and we wait briefly for it to make the POST.
+        assert t._prewarm_thread is not None
+        t._prewarm_thread.join(timeout=2)
+    assert post_calls, "background thread should have POSTed the warm-up prompt"
     assert post_calls[0]["json"]["messages"][0]["content"] == "ready?"
 
 
@@ -142,14 +147,34 @@ def test_prewarm_disabled_skips_post():
     t = Triage(TriageConfig(enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post") as p:
+        t.start_warmup()  # no-op when prewarm=False
         t._ensure_reachable()
     p.assert_not_called()
 
 
-def test_prewarm_failure_does_not_disable_triage():
-    """A pre-warm timeout/error must not permanently disable triage —
-    actual chat calls might still succeed."""
+def test_start_warmup_failure_does_not_disable_triage():
+    """A background warm-up failure must not permanently disable triage —
+    actual chat calls (on a later attempt) might still succeed."""
     t = Triage(TriageConfig(enabled=True, prewarm=True))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", side_effect=requests.ConnectionError("timeout")):
-        assert t._ensure_reachable() is True  # still reachable per /api/tags
+        t.start_warmup()
+        t._prewarm_thread.join(timeout=2)
+    # The cached reachability flag is still True (set from /api/tags).
+    assert t._reachable is True
+
+
+def test_wait_for_warmup_returns_false_on_timeout():
+    """If the model isn't warm in the given budget, we don't block forever."""
+    t = Triage(TriageConfig(enabled=True, prewarm=True))
+    # Don't start the warmup thread — just simulate "we asked but it's still not warm".
+    assert t._wait_for_warmup(max_wait=0) is True  # no thread = treat as warm
+    # With a stuck thread:
+    import threading
+    stop = threading.Event()
+    t._prewarm_thread = threading.Thread(target=stop.wait, daemon=True)
+    t._prewarm_thread.start()
+    try:
+        assert t._wait_for_warmup(max_wait=1) is False
+    finally:
+        stop.set()

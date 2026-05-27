@@ -45,12 +45,16 @@ triage:
   model: "gemma4:26b"
   base_url: "http://host.docker.internal:11434"
   keep_alive: "5m"
-  # First-time load of a large model can take minutes; 600s tolerates that.
-  # `keep_alive` keeps it warm for subsequent calls.
+  # Timeout for the heavy paths (fuzzy-dedup, prose). A ~17 GB model's first
+  # call of the day can take minutes; subsequent calls are fast (keep_alive).
   timeout: 600
-  # Send a no-op prompt at startup so the slow model load happens BEFORE any
-  # timed inference call. Strongly recommended for large models.
+  # Start the model loading in a BACKGROUND thread when secscan starts so it
+  # warms in parallel with the scanners. Strongly recommended for big models.
   prewarm: true
+  # Slack intro is a single one-liner at the end; cap it tightly so a slow
+  # model never blocks Slack delivery. If we can't get an intro in this window
+  # we post the structured digest without one.
+  intro_timeout: 120
 
 slack:
   enabled: false
