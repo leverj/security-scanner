@@ -1,5 +1,8 @@
 # secscan
 
+[![CI](https://github.com/leverj/security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/leverj/security-scanner/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Stateless single-repo security scanner. Detects a repo's stack, runs OSV-Scanner +
 Gitleaks + Semgrep, and files each finding as a deduplicated GitHub sub-issue under
 a user-provided parent issue.

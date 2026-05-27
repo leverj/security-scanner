@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install (editable + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check secscan/ tests/
+
+      - name: Tests (pytest)
+        run: pytest -q
+
+  docker-build:
+    # Build the image on PR/push to catch Dockerfile regressions without pushing it anywhere.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: secscan:ci
+          # Disable provenance/sbom for faster CI; can re-enable when we cut a release.
+          provenance: false
