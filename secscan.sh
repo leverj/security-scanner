@@ -100,7 +100,18 @@ cmd_run() {
     extra_args=("${filtered[@]+"${filtered[@]}"}")
   fi
 
-  [[ -f "$config" ]] || die "config not found: $config (copy config.example.yaml to config.yaml)"
+  if [[ ! -f "$config" ]]; then
+    cat >&2 <<EOF
+error: config not found at $config
+
+To set up:
+  cp config.example.yaml config.yaml
+  \$EDITOR config.yaml          # set repo, ref, parent_issue, secrets.source
+
+See README.md ("Setup: secrets") for env-vs-1Password choice.
+EOF
+    exit 1
+  fi
 
   local secrets_source env_file
   secrets_source="$(read_config_field "$config" "secrets.source" "env")"
@@ -118,7 +129,28 @@ cmd_run() {
   # container — so neither token nor URL appears on docker's argv.
   case "$secrets_source" in
     env)
-      [[ -n "${GITHUB_TOKEN:-}" ]] || die "GITHUB_TOKEN env var is required (secrets.source=env in config)"
+      if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+        cat >&2 <<EOF
+error: GITHUB_TOKEN not set in your shell (secrets.source=env in $config)
+
+Two ways to fix this:
+
+  1) Export it now:
+       export GITHUB_TOKEN=github_pat_xxx       # see README.md "Option A"
+       ./secscan.sh run
+
+  2) Switch to 1Password (recommended for daily use):
+       # in config.yaml
+       secrets:
+         source: "1password"
+         env_file: ".env.1password.tpl"
+       # then:
+       cp .env.1password.tpl.example .env.1password.tpl
+       \$EDITOR .env.1password.tpl               # set op:// vault paths
+       ./secscan.sh run
+EOF
+        exit 1
+      fi
       echo "secrets: env (using already-exported shell variables)" >&2
       exec docker run --rm \
         -v "$config":/config/config.yaml:ro \
@@ -126,10 +158,32 @@ cmd_run() {
         "$IMAGE" "${extra_args[@]+"${extra_args[@]}"}"
       ;;
     1password|1Password|op)
-      command -v op >/dev/null || die "1Password CLI (op) not on PATH; install: brew install 1password-cli"
+      if ! command -v op >/dev/null; then
+        cat >&2 <<EOF
+error: 1Password CLI (op) not on PATH but secrets.source=1password in $config
+
+Install it:
+  brew install 1password-cli
+  op signin
+
+Or switch to plain env vars by setting \`secrets.source: "env"\` in $config.
+EOF
+        exit 1
+      fi
       local ef="$env_file"
       [[ "$ef" = /* ]] || ef="$HERE/$ef"
-      [[ -f "$ef" ]] || die "secrets env file not found: $ef"
+      if [[ ! -f "$ef" ]]; then
+        cat >&2 <<EOF
+error: secrets env file not found: $ef
+
+Create it from the committed template:
+  cp .env.1password.tpl.example .env.1password.tpl
+  \$EDITOR .env.1password.tpl               # set op://<vault>/<item>/<field> paths
+
+The template lists every env var secscan understands.
+EOF
+        exit 1
+      fi
       echo "secrets: 1password (op run --env-file=$ef)" >&2
       exec op run --env-file="$ef" -- docker run --rm \
         -v "$config":/config/config.yaml:ro \
@@ -137,7 +191,7 @@ cmd_run() {
         "$IMAGE" "${extra_args[@]+"${extra_args[@]}"}"
       ;;
     *)
-      die "secrets.source must be 'env' or '1password', got: $secrets_source"
+      die "secrets.source must be 'env' or '1password' in $config, got: $secrets_source"
       ;;
   esac
 }
