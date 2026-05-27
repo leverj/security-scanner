@@ -79,8 +79,14 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
 
         # Slack digest (additive, never blocking).
         if cfg.slack.enabled:
-            digest = triage.write_slack_digest(findings, result, cfg.repo, cfg.ref, cfg.parent_issue) if (triage and triage.enabled) else None
-            post_digest(cfg.slack, findings, result, cfg.repo, cfg.ref, cfg.parent_issue, digest_text=digest)
+            intro = (
+                triage.write_slack_intro(findings, result, cfg.repo, cfg.ref, cfg.parent_issue)
+                if (triage and triage.enabled)
+                else None
+            )
+            post_digest(
+                cfg.slack, findings, result, cfg.repo, cfg.ref, cfg.parent_issue, intro=intro
+            )
 
         _print_summary(result, completed_scanners, failed, dry_run)
         # Exit 0 even when findings exist — the tool's job is to file, not to gate.

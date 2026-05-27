@@ -24,15 +24,26 @@ def post_digest(
     ref: str,
     parent_issue: int,
     digest_text: str | None = None,
+    intro: str | None = None,
 ) -> bool:
     """Post a Slack message summarizing the run. Returns True on success.
 
-    `digest_text` may be supplied by triage; otherwise a deterministic summary is built.
+    Two ways callers can influence the message:
+      - `intro` (preferred): a one-line LLM-generated summary that we prepend to
+        the deterministic per-category digest. Structure stays consistent across
+        runs; the LLM only adds color.
+      - `digest_text` (legacy): fully replaces the digest body. Kept for callers
+        that want to entirely override the format.
     """
     if not slack.enabled:
         return False
 
-    text = digest_text or _default_digest(findings, result, repo, ref, parent_issue)
+    if digest_text:
+        text = digest_text
+    else:
+        text = _default_digest(findings, result, repo, ref, parent_issue)
+        if intro:
+            text = f":speech_balloon: _{intro}_\n\n{text}"
 
     try:
         if slack.webhook_url_env:

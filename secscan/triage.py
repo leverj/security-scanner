@@ -95,10 +95,17 @@ class Triage:
             return default_issue(f)
         return title, body
 
-    def write_slack_digest(
+    def write_slack_intro(
         self, findings: list[Finding], result: SyncResult, repo: str, ref: str, parent_issue: int
     ) -> str | None:
-        """Optional: draft a Slack digest. Caller falls back to deterministic if None."""
+        """Generate ONLY a one-line, human-tone summary line that the notifier
+        prepends to the deterministic per-category digest.
+
+        The deterministic digest already provides structure (sections per
+        category, top-N findings each, severity totals); the LLM's job is just
+        to add a one-sentence framing. Returns None on any error so the digest
+        renders structurally without the prose intro.
+        """
         if not self.enabled or not self._ensure_reachable():
             return None
         summary = {
@@ -112,16 +119,25 @@ class Triage:
             "top_rules": _top_rules(findings, n=5),
         }
         prompt = (
-            "Write a concise Slack message (<= 4 short lines) summarizing this security scan run. "
-            "Use only the numbers below. No emojis. Reply as plain text, no JSON.\n\n"
+            "In one short sentence (<= 120 chars), characterize this security scan's "
+            "overall risk posture. Be specific (cite the most severe category or top "
+            "package only when there's exactly one). No emojis, no formatting, no JSON. "
+            "If the run was clean, say so.\n\n"
             f"{json.dumps(summary, indent=2)}"
         )
         try:
             text = self._chat_text(prompt)
         except Exception as e:
-            print(f"triage: slack digest chat failed: {e}", file=sys.stderr)
+            print(f"triage: slack intro chat failed: {e}", file=sys.stderr)
             return None
-        return text.strip() or None
+        text = (text or "").strip()
+        # Defensive: drop any model-emitted JSON braces / markdown fences.
+        if text.startswith("{") or text.startswith("```"):
+            return None
+        return text.split("\n")[0][:200] if text else None
+
+    # Backwards-compat alias for any callers still on the old name.
+    write_slack_digest = write_slack_intro
 
     # ---- internals ----------------------------------------------------------
 

@@ -27,6 +27,24 @@ def _fake_completed(rc: int, stdout: str = "", stderr: str = "") -> subprocess.C
     return subprocess.CompletedProcess(args=[], returncode=rc, stdout=stdout, stderr=stderr)
 
 
+def _fake_side_effect(rc: int, stdout: str = "", stderr: str = ""):
+    """Like _fake_completed, but also honors the gitleaks-style
+    `--report-path <path>` flag: writes `stdout` to that path so file-based
+    readers see the SARIF where they expect."""
+
+    def _f(cmd, **kw):
+        if "--report-path" in cmd:
+            idx = cmd.index("--report-path")
+            if idx + 1 < len(cmd) and cmd[idx + 1] not in ("", "-"):
+                try:
+                    Path(cmd[idx + 1]).write_text(stdout)
+                except OSError:
+                    pass
+        return _fake_completed(rc, stdout, stderr)
+
+    return _f
+
+
 def _assert_no_execute_verbs(cmd: list[str]) -> None:
     # `semgrep scan` is the subcommand; allow it explicitly. Anything else execute-like is banned.
     for arg in cmd[1:]:  # skip the binary name itself
@@ -60,8 +78,7 @@ def test_run_invokes_subprocess_with_cwd(tmp_path: Path):
     ],
 )
 def test_runner_exit_zero_returns_parsed_sarif(module, kwargs, scanner, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
-        m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
+    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(0, TINY_SARIF_JSON, "")) as m:
         result: RunnerResult = module.run(tmp_path, **kwargs)
     assert result.completed is True
     assert result.scanner == scanner
@@ -90,9 +107,9 @@ def test_runner_exit_zero_returns_parsed_sarif(module, kwargs, scanner, tmp_path
 def test_runner_vulns_found_exit_code_is_success(
     module, kwargs, scanner, vuln_rc, tmp_path: Path
 ):
-    with patch("secscan.runners.subprocess.run") as m:
-        m.return_value = _fake_completed(vuln_rc, TINY_SARIF_JSON, "")
+    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(vuln_rc, TINY_SARIF_JSON, "")) as m:
         result = module.run(tmp_path, **kwargs)
+    assert m.called
     assert result.completed is True
     assert result.scanner == scanner
     assert result.sarif == TINY_SARIF
@@ -148,8 +165,7 @@ def test_runner_unexpected_exit_code_is_failure(module, kwargs, tmp_path: Path):
     ],
 )
 def test_runner_unparseable_json_is_failure(module, kwargs, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
-        m.return_value = _fake_completed(0, "not json at all <<<", "")
+    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(0, "not json at all <<<", "")):
         result = module.run(tmp_path, **kwargs)
     assert result.completed is False
     assert result.sarif is None
@@ -223,37 +239,52 @@ def test_semgrep_passes_config_and_excludes(tmp_path: Path):
     assert "--sarif" in cmd
 
 
-# --- gitleaks-specific: stdout report wiring --------------------------------
+# --- gitleaks-specific: file-based report wiring ----------------------------
 
-def test_gitleaks_reports_to_stdout(tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
-        m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
+def test_gitleaks_writes_report_to_tempfile_in_root(tmp_path: Path):
+    """v8 ignores `--report-path -` (silently writes 0 bytes to stdout). We must
+    pass a real file path inside the scan root."""
+    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(0, TINY_SARIF_JSON, "")) as m:
         gitleaks_runner.run(tmp_path)
     cmd = m.call_args.args[0]
     assert "--report-format" in cmd
     assert "sarif" in cmd
     assert "--report-path" in cmd
-    # stdout sentinel
-    assert "-" in cmd
+    idx = cmd.index("--report-path")
+    report_path = cmd[idx + 1]
+    assert report_path != "-"
+    # Path must live inside the scan root so it shares lifecycle.
+    assert report_path.startswith(str(tmp_path))
 
 
-# --- gitleaks-specific: version-dependent exit codes ------------------------
+def test_gitleaks_tempfile_is_cleaned_up_after_run(tmp_path: Path):
+    """The tempfile must not survive the run regardless of outcome."""
+    captured_path = {}
+
+    def _capture(cmd, **kw):
+        idx = cmd.index("--report-path")
+        captured_path["p"] = cmd[idx + 1]
+        Path(cmd[idx + 1]).write_text(TINY_SARIF_JSON)
+        return _fake_completed(0, "", "")
+
+    with patch("secscan.runners.subprocess.run", side_effect=_capture):
+        gitleaks_runner.run(tmp_path)
+    assert not Path(captured_path["p"]).exists()
+
 
 @pytest.mark.parametrize("rc", [0, 1, 77])
-def test_gitleaks_accepts_any_exit_code_when_sarif_parses(rc, tmp_path: Path):
+def test_gitleaks_accepts_any_exit_code_when_report_parses(rc, tmp_path: Path):
     """v7 used rc=77 for "leaks found"; v8 uses rc=1. We trust the SARIF parse,
-    not the exit code: if stdout is valid SARIF the run was successful."""
-    with patch("secscan.runners.subprocess.run") as m:
-        m.return_value = _fake_completed(rc, TINY_SARIF_JSON, "")
+    not the exit code: if the report file is valid SARIF the run was successful."""
+    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(rc, TINY_SARIF_JSON, "")):
         result = gitleaks_runner.run(tmp_path)
     assert result.completed is True
     assert result.sarif == TINY_SARIF
 
 
-def test_gitleaks_non_zero_with_unparseable_stdout_is_failure(tmp_path: Path):
-    """A genuinely failed gitleaks run still gets reported as a failure."""
-    with patch("secscan.runners.subprocess.run") as m:
-        m.return_value = _fake_completed(1, "not sarif", "config error")
+def test_gitleaks_no_report_file_written_is_failure(tmp_path: Path):
+    """Genuine failure: scanner didn't write the report. Empty/missing file -> error."""
+    with patch("secscan.runners.subprocess.run", return_value=_fake_completed(1, "", "config error")):
         result = gitleaks_runner.run(tmp_path)
     assert result.completed is False
-    assert "exit 1" in (result.error or "")
+    assert "no SARIF report written" in (result.error or "") or "exit 1" in (result.error or "")

@@ -98,6 +98,37 @@ def test_default_digest_caps_per_section():
     assert "and 5 more" in text  # cap = 5 per section
 
 
+def test_intro_is_prepended_to_structured_digest(monkeypatch):
+    """LLM intro should ride on top of the deterministic per-category digest,
+    not replace it."""
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
+    slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
+    resp = MagicMock(status_code=200)
+    with patch("secscan.notify.requests.post", return_value=resp) as mp:
+        post_digest(
+            slack, [_f("high"), _f("medium")], SyncResult(created=[{"n": 1}]),
+            "o/n", "main", 9,
+            intro="High-risk run: jwt@2.10.2 has an unpatched RCE",
+        )
+    sent = mp.call_args.kwargs["json"]["text"]
+    # The LLM intro is bold-italicized at top.
+    assert "High-risk run: jwt@2.10.2" in sent
+    # The deterministic structure is still present.
+    assert ":test_tube:" in sent  # SAST section emoji
+    assert ":bar_chart:" in sent  # severity totals
+    # Intro is on the FIRST line, structure follows.
+    assert sent.splitlines()[0].startswith(":speech_balloon:")
+
+
+def test_digest_text_legacy_param_still_overrides(monkeypatch):
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
+    slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
+    resp = MagicMock(status_code=200)
+    with patch("secscan.notify.requests.post", return_value=resp) as mp:
+        post_digest(slack, [_f("high")], SyncResult(), "o/n", "main", 9, digest_text="exact replacement")
+    assert mp.call_args.kwargs["json"]["text"] == "exact replacement"
+
+
 def test_failure_is_non_blocking(monkeypatch):
     import requests
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
