@@ -110,30 +110,31 @@ def _scan_and_normalize(
 ) -> tuple[list[Finding], list[str], list[tuple[str, str]], list[dict]]:
     """Run each detected scanner once; collect normalized findings + SBOM artifacts.
 
-    OSV is invoked once per detected ecosystem-dir. Gitleaks/Semgrep/Trivy/Trufflehog/Syft
-    run once against the whole tree. A scanner that fails contributes zero findings (so
-    a crashed scanner never reads as 'all clear').
+    All scanners run once against the repo root. OSV-Scanner with `--recursive`
+    finds every lockfile across all ecosystems in a single pass; invoking it
+    per-ecosystem-dir was wasteful AND broke on Xcode-style layouts where
+    `Package.resolved` is nested away from `Package.swift`. A scanner that fails
+    contributes zero findings (so a crashed scanner never reads as 'all clear').
     """
     findings: list[Finding] = []
     completed: set[str] = set()
     failed: list[tuple[str, str]] = []
     sbom_artifacts: list[dict] = []
 
-    # Group osv targets so we run osv once per dir; others once total.
-    osv_targets = [t for t in detection.targets if t.scanner == "osv"]
-    other_targets = [t for t in detection.targets if t.scanner != "osv"]
-
     semgrep_rules = _resolve_semgrep_rules(cfg)
 
-    for t in osv_targets:
-        result = _invoke_runner(t, cfg, repo_dir, semgrep_rules)
-        _absorb(result, t, cfg.paths.exclude, findings, completed, failed, sbom_artifacts)
-
-    seen_other: set[str] = set()
-    for t in other_targets:
-        if t.scanner in seen_other:
+    # Collapse multi-target scanners (e.g. several OSV ecosystem dirs) to a single
+    # whole-tree invocation. We preserve the detected ecosystems in the printed
+    # detection summary; the runner sees only one target = repo root.
+    scanners_to_run: dict[str, ScannerTarget] = {}
+    for t in detection.targets:
+        if t.scanner in scanners_to_run:
             continue
-        seen_other.add(t.scanner)
+        scanners_to_run[t.scanner] = ScannerTarget(
+            scanner=t.scanner, ecosystem=None, targets=[repo_dir]
+        )
+
+    for t in scanners_to_run.values():
         result = _invoke_runner(t, cfg, repo_dir, semgrep_rules)
         _absorb(result, t, cfg.paths.exclude, findings, completed, failed, sbom_artifacts)
 
