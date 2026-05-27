@@ -41,6 +41,13 @@ class TriageConfig:
     model: str = "gemma4:26b"
     base_url: str = "http://host.docker.internal:11434"
     keep_alive: str = "5m"
+    # Cold-start of a ~17 GB Gemma model can take several minutes the first time
+    # the day. Subsequent calls are fast thanks to keep_alive. 600s tolerates the
+    # cold case; keep_alive amortizes it across the rest of the run.
+    timeout: int = 600
+    # If True, send a tiny prompt up front so the slow load happens before any
+    # timed inference call. Strongly recommended for large models.
+    prewarm: bool = True
 
 
 @dataclass
@@ -121,12 +128,18 @@ def _from_dict(raw: dict) -> Config:
     paths = PathsConfig(exclude=list(paths_raw.get("exclude") or []))
 
     triage_raw = raw.get("triage") or {}
+    try:
+        triage_timeout = int(triage_raw.get("timeout") or 600)
+    except (TypeError, ValueError):
+        triage_timeout = 600
     triage = TriageConfig(
         enabled=bool(triage_raw.get("enabled", False)),
         provider=str(triage_raw.get("provider") or "ollama"),
         model=str(triage_raw.get("model") or "gemma4:26b"),
         base_url=str(triage_raw.get("base_url") or "http://host.docker.internal:11434"),
         keep_alive=str(triage_raw.get("keep_alive") or "5m"),
+        timeout=triage_timeout,
+        prewarm=bool(triage_raw.get("prewarm", True)),
     )
 
     slack_raw = raw.get("slack") or {}

@@ -103,7 +103,8 @@ def test_finding_brief_never_includes_raw_secret():
 
 
 def test_no_candidates_means_no_chat():
-    t = Triage(TriageConfig(enabled=True))
+    """When all existing issues lack secscan markers, fuzzy-dup short-circuits."""
+    t = Triage(TriageConfig(enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post") as p:
         assert t.is_duplicate_of_existing(_f(), [{"number": 1, "body": "no marker", "title": "x"}]) is False
@@ -112,8 +113,43 @@ def test_no_candidates_means_no_chat():
 
 def test_slack_digest_returns_text():
     from secscan.sync import SyncResult
-    t = Triage(TriageConfig(enabled=True))
+    t = Triage(TriageConfig(enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response("Hello digest")):
         text = t.write_slack_digest([_f()], SyncResult(created=[{"n": 1}]), "o/n", "main", 42)
     assert text == "Hello digest"
+
+
+def test_triage_timeout_is_configurable_and_clamped():
+    t = Triage(TriageConfig(enabled=True, timeout=900))
+    assert t._timeout == 900
+    # Floor: don't allow ridiculously low values that would break inference.
+    t2 = Triage(TriageConfig(enabled=True, timeout=5))
+    assert t2._timeout >= 60
+
+
+def test_prewarm_fires_on_first_reachable_check():
+    t = Triage(TriageConfig(enabled=True, prewarm=True))
+    post_calls = []
+    with patch.object(t._session, "get", return_value=_reachable_response()), \
+         patch.object(t._session, "post", side_effect=lambda *a, **kw: post_calls.append(kw) or _gemma_response("ok")):
+        assert t._ensure_reachable() is True
+    assert post_calls  # at least one POST = the prewarm
+    assert post_calls[0]["json"]["messages"][0]["content"] == "ready?"
+
+
+def test_prewarm_disabled_skips_post():
+    t = Triage(TriageConfig(enabled=True, prewarm=False))
+    with patch.object(t._session, "get", return_value=_reachable_response()), \
+         patch.object(t._session, "post") as p:
+        t._ensure_reachable()
+    p.assert_not_called()
+
+
+def test_prewarm_failure_does_not_disable_triage():
+    """A pre-warm timeout/error must not permanently disable triage —
+    actual chat calls might still succeed."""
+    t = Triage(TriageConfig(enabled=True, prewarm=True))
+    with patch.object(t._session, "get", return_value=_reachable_response()), \
+         patch.object(t._session, "post", side_effect=requests.ConnectionError("timeout")):
+        assert t._ensure_reachable() is True  # still reachable per /api/tags

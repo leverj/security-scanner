@@ -58,7 +58,14 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
 
         detection = detect_stack(
             repo_dir,
-            {"osv": cfg.scanners.osv, "gitleaks": cfg.scanners.gitleaks, "semgrep": cfg.scanners.semgrep},
+            {
+                "osv":        cfg.scanners.osv,
+                "gitleaks":   cfg.scanners.gitleaks,
+                "semgrep":    cfg.scanners.semgrep,
+                "trivy":      cfg.scanners.trivy,
+                "trufflehog": cfg.scanners.trufflehog,
+                "syft":       cfg.scanners.syft,
+            },
             exclude=cfg.paths.exclude,
         )
         _log_detection(detection)

@@ -32,9 +32,10 @@ class Triage:
     def __init__(self, cfg: TriageConfig):
         self.cfg = cfg
         self.enabled = cfg.enabled
-        self._timeout = 120
+        self._timeout = max(60, int(getattr(cfg, "timeout", 600)))
         self._session = requests.Session()
         self._reachable: bool | None = None  # lazy probe
+        self._warmed: bool = False  # set once a successful chat has loaded the model
 
     # ---- public API used by sync.py -----------------------------------------
 
@@ -150,7 +151,40 @@ class Triage:
         except requests.RequestException:
             self._reachable = False
             print(f"triage: Ollama unreachable at {self.cfg.base_url}", file=sys.stderr)
+        if self._reachable and getattr(self.cfg, "prewarm", True) and not self._warmed:
+            self._prewarm()
         return self._reachable
+
+    def _prewarm(self) -> None:
+        """Load the model into memory before any timed inference call. A ~17 GB
+        Gemma model can take a minute or two to load the first time today; doing
+        it explicitly with a no-op prompt amortizes the cost out of the first
+        real call (which would otherwise hit the configured timeout)."""
+        try:
+            print(
+                f"triage: pre-warming {self.cfg.model} at {self.cfg.base_url} "
+                f"(this may take a minute on first run)…",
+                file=sys.stderr,
+            )
+            self._session.post(
+                f"{self.cfg.base_url.rstrip('/')}/api/chat",
+                json={
+                    "model": self.cfg.model,
+                    "messages": [{"role": "user", "content": "ready?"}],
+                    "stream": False,
+                    "keep_alive": self.cfg.keep_alive,
+                },
+                timeout=self._timeout,
+            )
+            self._warmed = True
+            print("triage: model ready", file=sys.stderr)
+        except requests.RequestException as e:
+            print(
+                f"triage: pre-warm failed ({e}); triage will be skipped for this run",
+                file=sys.stderr,
+            )
+            # Don't flip _reachable=False here — let downstream calls also try; one
+            # of them might succeed.
 
     def _chat_json(self, user_prompt: str) -> object:
         """POST /api/chat with format=json so Ollama returns parseable JSON."""
