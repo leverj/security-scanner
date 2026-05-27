@@ -1,8 +1,13 @@
-"""SARIF -> Finding. One shape for all scanners; scanner-specific bits in extra."""
+"""SARIF -> Finding. One shape for all scanners; scanner-specific bits in extra.
+
+For Trivy (multi-category) and Trufflehog (JSONL, not SARIF), this module
+special-cases the parse path. The output shape is identical regardless.
+"""
 
 from __future__ import annotations
 
 import fnmatch
+import json
 import sys
 from fnmatch import fnmatchcase
 
@@ -13,10 +18,21 @@ _CATEGORY = {"osv": "dependency", "gitleaks": "secret", "semgrep": "sast"}
 
 def normalize_sarif(sarif: dict, scanner: str, exclude: list[str] | None = None) -> list[Finding]:
     """Parse a SARIF document into Findings. Drops results with no location."""
+    exclude = exclude or []
+
+    # Trufflehog uses JSONL, not SARIF — carried inside a wrapper dict.
+    if scanner == "trufflehog":
+        return _normalize_trufflehog(sarif, exclude)
+    # Trivy multi-category SARIF.
+    if scanner == "trivy":
+        return _normalize_trivy(sarif, exclude)
+    # Syft produces an SBOM artifact, not findings.
+    if scanner == "syft":
+        return []
+
     if scanner not in _CATEGORY:
         raise ValueError(f"unknown scanner: {scanner!r}")
     category = _CATEGORY[scanner]
-    exclude = exclude or []
 
     findings: list[Finding] = []
     for run in sarif.get("runs") or []:
@@ -29,6 +45,162 @@ def normalize_sarif(sarif: dict, scanner: str, exclude: list[str] | None = None)
                 continue
             findings.append(f)
     return findings
+
+
+# ---- Trivy: multi-category SARIF ------------------------------------------
+
+# Trivy stamps each rule with a "Type" property. Map the tags/types we see to
+# our categories. Unknown ones fall back to "dependency" (most common).
+_TRIVY_TYPE_TO_CATEGORY = {
+    "vulnerability": "dependency",
+    "secret": "secret",
+    "misconfiguration": "iac",
+    "license": "license",
+}
+
+
+def _normalize_trivy(sarif: dict, exclude: list[str]) -> list[Finding]:
+    findings: list[Finding] = []
+    for run in sarif.get("runs") or []:
+        rules_by_id = _index_rules(run)
+        for result in run.get("results") or []:
+            rule_id = result.get("ruleId") or ""
+            rule_def = rules_by_id.get(rule_id) or {}
+            category = _trivy_category_for(rule_def, result)
+            f = _result_to_finding(result, "trivy", category, rules_by_id)
+            if f is None:
+                continue
+            if _is_excluded(f.file_path, exclude):
+                continue
+            findings.append(f)
+    return findings
+
+
+def _trivy_category_for(rule_def: dict, result: dict) -> str:
+    """Inspect Trivy's rule properties to pick one of our categories."""
+    props = {**(rule_def.get("properties") or {}), **(result.get("properties") or {})}
+    rtype = (props.get("type") or "").lower()
+    if rtype in _TRIVY_TYPE_TO_CATEGORY:
+        return _TRIVY_TYPE_TO_CATEGORY[rtype]
+    tags = props.get("tags") or []
+    if isinstance(tags, list):
+        lowered = {str(t).lower() for t in tags}
+        if "secret" in lowered:
+            return "secret"
+        if "misconfiguration" in lowered or "iac" in lowered:
+            return "iac"
+        if "license" in lowered:
+            return "license"
+        if "vulnerability" in lowered or "cve" in lowered:
+            return "dependency"
+    # Heuristic: rule_id pattern (Trivy uses CVE-/GHSA-/AVD-/DS- prefixes)
+    rid = (rule_def.get("id") or result.get("ruleId") or "").upper()
+    if rid.startswith(("CVE-", "GHSA-")):
+        return "dependency"
+    if rid.startswith(("AVD-", "KSV", "DS")):
+        return "iac"
+    return "dependency"
+
+
+# ---- Trufflehog: JSONL with verified-secret semantics ----------------------
+
+def _normalize_trufflehog(wrapper: dict, exclude: list[str]) -> list[Finding]:
+    """Parse the JSONL payload carried in runners.trufflehog's RunnerResult.sarif."""
+    payload = wrapper.get("_trufflehog_jsonl")
+    if not isinstance(payload, str) or not payload.strip():
+        return []
+    findings: list[Finding] = []
+    for line in payload.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            print(f"normalize: skipping unparseable trufflehog line: {line[:80]!r}", file=sys.stderr)
+            continue
+        f = _trufflehog_obj_to_finding(obj)
+        if f is None:
+            continue
+        if _is_excluded(f.file_path, exclude):
+            continue
+        findings.append(f)
+    return findings
+
+
+def _trufflehog_obj_to_finding(obj: dict) -> Finding | None:
+    """One Trufflehog JSON record -> Finding.
+
+    Verified secrets get severity=critical; unverified get severity=high.
+    The raw secret is NEVER stored on the Finding; only Trufflehog's redacted
+    form is exposed.
+    """
+    detector = obj.get("DetectorName") or obj.get("DetectorType") or "unknown"
+    verified = bool(obj.get("Verified"))
+    category = "secret-verified" if verified else "secret"
+
+    meta = ((obj.get("SourceMetadata") or {}).get("Data") or {})
+    # Trufflehog reports source under several keys depending on the scan type.
+    src = meta.get("Filesystem") or meta.get("Git") or {}
+    file_path = (src.get("file") or src.get("filename") or src.get("path") or "").replace("\\", "/")
+    line = src.get("line")
+    try:
+        line = int(line) if line is not None else None
+    except (TypeError, ValueError):
+        line = None
+    if not file_path:
+        print(f"normalize: skipping trufflehog result {detector!r} (no path)", file=sys.stderr)
+        return None
+
+    # Build a deterministic secret_fingerprint from the redacted form + detector;
+    # do NOT use the raw secret in any identity computation.
+    redacted = (obj.get("Redacted") or "")
+    raw_v2 = (obj.get("RawV2") or "")
+    secret_fp = _trufflehog_fingerprint(detector, redacted or raw_v2 or "unknown")
+
+    masked_preview = redacted or _mask(raw_v2 or "")
+    severity = "critical" if verified else "high"
+
+    rule_id = f"trufflehog/{detector}" + ("/verified" if verified else "")
+    title = f"{rule_id}: {redacted or detector}"
+    if len(title) > 200:
+        title = title[:197] + "..."
+
+    extra = {
+        "detector": detector,
+        "verified": verified,
+        "secret_fingerprint": secret_fp,
+    }
+    return Finding(
+        scanner="trufflehog",
+        category=category,
+        rule_id=rule_id,
+        severity=severity,
+        file_path=file_path,
+        line=line,
+        title=title,
+        message=f"{detector} secret detected" + (" (VERIFIED LIVE)" if verified else ""),
+        masked_preview=masked_preview,
+        sarif_fingerprint=None,
+        extra=extra,
+    )
+
+
+def _trufflehog_fingerprint(detector: str, key_material: str) -> str:
+    """Deterministic per-(detector, redacted-value) hash. Used in Finding.extra
+    so fingerprint.py's secret-category logic produces a stable fp."""
+    import hashlib
+
+    return hashlib.sha256(f"{detector}\0{key_material}".encode()).hexdigest()[:16]
+
+
+def _mask(s: str) -> str:
+    s = (s or "").strip()
+    if not s:
+        return ""
+    if len(s) <= 6:
+        return "•" * len(s)
+    return f"{s[:2]}{'•' * (len(s) - 6)}{s[-4:]}"
 
 
 def _index_rules(run: dict) -> dict[str, dict]:

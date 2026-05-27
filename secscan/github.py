@@ -35,6 +35,7 @@ class GitHub:
         self.owner = owner
         self.name = name
         self.dry_run = dry_run
+        self._LABEL_CREATED = set()
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"Bearer {token}",
@@ -121,11 +122,51 @@ class GitHub:
         if labels is None:
             labels = ["security"]
         if self.dry_run:
-            print(f"DRY-RUN would create: {title}", file=sys.stderr)
+            print(f"DRY-RUN would create: {title} (labels={labels})", file=sys.stderr)
             return {"number": 0, "title": title, "body": body, "html_url": "<dry-run>", "state": "open"}
+        # Idempotently ensure any non-default labels exist before we POST the issue;
+        # GitHub returns 422 if an unknown label is passed in the issue payload.
+        for lbl in labels:
+            if lbl != "security":
+                self._ensure_label(lbl)
         url = f"{_API}/repos/{self.owner}/{self.name}/issues"
         resp = self._request("POST", url, json={"title": title, "body": body, "labels": labels})
         return resp.json()
+
+    # Color palette per category/severity. Anything unmapped becomes mid-grey.
+    _LABEL_COLOR = {
+        # categories
+        "secscan:dependency": "5319e7",        # purple — language/OS package CVEs
+        "secscan:secret": "d93f0b",            # red — pattern-matched secret
+        "secscan:secret-verified": "b60205",   # dark red — live/verified secret
+        "secscan:sast": "fbca04",              # yellow — code patterns
+        "secscan:iac": "0e8a16",               # green — IaC misconfig
+        "secscan:license": "1d76db",           # blue — license issues
+        # severities
+        "secscan:critical": "b60205",
+        "secscan:high":     "d93f0b",
+        "secscan:medium":   "fbca04",
+        "secscan:low":      "c5def5",
+        "secscan:info":     "ededed",
+    }
+    _LABEL_CREATED: set[str]  # populated in __init__
+
+    def _ensure_label(self, name: str) -> None:
+        """Create the label if it doesn't exist. 422 (already exists) is fine."""
+        if name in self._LABEL_CREATED:
+            return
+        self._LABEL_CREATED.add(name)
+        color = self._LABEL_COLOR.get(name, "ededed")
+        try:
+            self._request(
+                "POST",
+                f"{_API}/repos/{self.owner}/{self.name}/labels",
+                json={"name": name, "color": color, "description": "secscan-managed label"},
+            )
+        except GitHubError as e:
+            # 422 = label already exists with this name; anything else is a real problem.
+            if e.status != 422:
+                print(f"github: could not create label {name!r}: {e}", file=sys.stderr)
 
     def link_subissue(self, parent_issue: int, child_issue: dict) -> None:
         """Attach `child_issue` as a sub-issue of `parent_issue`.

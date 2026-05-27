@@ -200,6 +200,9 @@ def detect_stack(
     osv_on = bool(scanners_enabled.get("osv"))
     gitleaks_on = bool(scanners_enabled.get("gitleaks"))
     semgrep_on = bool(scanners_enabled.get("semgrep"))
+    trivy_on = bool(scanners_enabled.get("trivy"))
+    trufflehog_on = bool(scanners_enabled.get("trufflehog"))
+    syft_on = bool(scanners_enabled.get("syft"))
 
     targets: list[ScannerTarget] = []
     notes: list[str] = []
@@ -236,6 +239,15 @@ def detect_stack(
         targets.append(ScannerTarget(scanner="semgrep", ecosystem=None, targets=[root]))
     elif (not semgrep_on) and has_source:
         notes.append("source code detected but semgrep scanner disabled")
+
+    # Trivy / Trufflehog / Syft: whole-tree scanners that auto-detect their own
+    # inputs (containers, IaC, language packages, secrets). No manifest gating.
+    if trivy_on:
+        targets.append(ScannerTarget(scanner="trivy", ecosystem=None, targets=[root]))
+    if trufflehog_on:
+        targets.append(ScannerTarget(scanner="trufflehog", ecosystem=None, targets=[root]))
+    if syft_on:
+        targets.append(ScannerTarget(scanner="syft", ecosystem=None, targets=[root]))
 
     # Unscanned ecosystems (Java, PHP, Dart, ...) — always note, scanner-agnostic.
     for label in sorted(unscanned_notes):

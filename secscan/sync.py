@@ -115,9 +115,24 @@ def sync(
             title, body = default_issue(f)
 
         body = inject_marker(body, fp, f)
-        issue = gh.create_issue(title, body)
+        issue = gh.create_issue(title, body, labels=_labels_for(f))
         gh.link_subissue(parent_issue, issue)
         result.created.append(issue)
         existing_fps.add(fp)
 
     return result
+
+
+def _labels_for(f: Finding) -> list[str]:
+    """The label set applied to a sub-issue.
+
+    `security` is the existing umbrella label. `secscan:<category>` lets you
+    filter the parent's sub-issue list by category in the GitHub UI.
+    `secscan:<severity>` lets you triage by severity. All labels are namespaced
+    under `secscan:` so they're easy to clean up if you ever drop the tool.
+    """
+    return [
+        "security",
+        f"secscan:{f.category}",
+        f"secscan:{f.severity}",
+    ]

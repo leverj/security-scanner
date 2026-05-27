@@ -18,9 +18,18 @@ secrets:
   env_file: ".env.1password.tpl"   # used only when source == "1password"
 
 scanners:
+  # Vulnerability scanners (language packages)
   osv: true
+  # Secret scanners — gitleaks (patterns) + trufflehog (live verification).
+  # Enable both: gitleaks catches more, trufflehog flags verified-live secrets at critical.
   gitleaks: true
+  trufflehog: true
+  # SAST (code patterns)
   semgrep: true
+  # Comprehensive supply chain: vuln + secret + IaC + license, all in one binary.
+  trivy: true
+  # SBOM artifact (CycloneDX JSON written to /work). Files no sub-issues.
+  syft: true
 
 paths:
   exclude:

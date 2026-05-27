@@ -63,8 +63,13 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         )
         _log_detection(detection)
 
-        findings, completed_scanners, failed = _scan_and_normalize(detection, cfg, repo_dir)
+        findings, completed_scanners, failed, sbom_artifacts = _scan_and_normalize(detection, cfg, repo_dir)
         _log_scanner_summary(completed_scanners, failed)
+        for sbom in sbom_artifacts:
+            print(
+                f"sbom: {sbom.get('format')} -> {sbom.get('path')} ({sbom.get('components')} components)",
+                file=sys.stderr,
+            )
 
         triage = _maybe_triage(cfg)
 
@@ -102,18 +107,19 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
 
 def _scan_and_normalize(
     detection: DetectionResult, cfg: Config, repo_dir: Path
-) -> tuple[list[Finding], list[str], list[tuple[str, str]]]:
-    """Run each detected scanner once; collect normalized findings.
+) -> tuple[list[Finding], list[str], list[tuple[str, str]], list[dict]]:
+    """Run each detected scanner once; collect normalized findings + SBOM artifacts.
 
-    OSV is invoked once per detected ecosystem-dir. Gitleaks/Semgrep run once
-    against the whole tree. A scanner that fails contributes zero findings (so
+    OSV is invoked once per detected ecosystem-dir. Gitleaks/Semgrep/Trivy/Trufflehog/Syft
+    run once against the whole tree. A scanner that fails contributes zero findings (so
     a crashed scanner never reads as 'all clear').
     """
     findings: list[Finding] = []
     completed: set[str] = set()
     failed: list[tuple[str, str]] = []
+    sbom_artifacts: list[dict] = []
 
-    # Group osv targets so we run osv once per dir; gitleaks/semgrep once total.
+    # Group osv targets so we run osv once per dir; others once total.
     osv_targets = [t for t in detection.targets if t.scanner == "osv"]
     other_targets = [t for t in detection.targets if t.scanner != "osv"]
 
@@ -121,7 +127,7 @@ def _scan_and_normalize(
 
     for t in osv_targets:
         result = _invoke_runner(t, cfg, repo_dir, semgrep_rules)
-        _absorb(result, t, cfg.paths.exclude, findings, completed, failed)
+        _absorb(result, t, cfg.paths.exclude, findings, completed, failed, sbom_artifacts)
 
     seen_other: set[str] = set()
     for t in other_targets:
@@ -129,9 +135,9 @@ def _scan_and_normalize(
             continue
         seen_other.add(t.scanner)
         result = _invoke_runner(t, cfg, repo_dir, semgrep_rules)
-        _absorb(result, t, cfg.paths.exclude, findings, completed, failed)
+        _absorb(result, t, cfg.paths.exclude, findings, completed, failed, sbom_artifacts)
 
-    return findings, sorted(completed), failed
+    return findings, sorted(completed), failed, sbom_artifacts
 
 
 def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules: Path | str | None) -> RunnerResult:
@@ -145,6 +151,13 @@ def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules:
         if not semgrep_rules:
             return RunnerResult("semgrep", None, False, "no semgrep rules configured")
         return mod.run(repo_dir, rules_dir=semgrep_rules, exclude=cfg.paths.exclude)
+    if t.scanner == "trivy":
+        return mod.run(repo_dir, exclude=cfg.paths.exclude)
+    if t.scanner == "trufflehog":
+        return mod.run(repo_dir, exclude=cfg.paths.exclude)
+    if t.scanner == "syft":
+        sbom_path = repo_dir.parent / f"sbom-{cfg.repo_name}.cyclonedx.json"
+        return mod.run(repo_dir, output_path=sbom_path)
     return RunnerResult(t.scanner, None, False, f"unknown scanner: {t.scanner}")
 
 
@@ -155,12 +168,19 @@ def _absorb(
     findings: list[Finding],
     completed: set[str],
     failed: list[tuple[str, str]],
+    sbom_artifacts: list[dict] | None = None,
 ) -> None:
     if not result.completed or result.sarif is None:
         failed.append((t.scanner, result.error or "unknown error"))
         print(f"scanner {t.scanner}: NOT COMPLETED ({result.error})", file=sys.stderr)
         return
     completed.add(result.scanner)
+    # Syft carries an SBOM artifact descriptor, not findings. Record it for logging.
+    if result.scanner == "syft" and sbom_artifacts is not None:
+        meta = result.sarif.get("_syft_sbom") if isinstance(result.sarif, dict) else None
+        if isinstance(meta, dict):
+            sbom_artifacts.append(meta)
+        return
     findings.extend(normalize_sarif(result.sarif, result.scanner, exclude=exclude))
 
 

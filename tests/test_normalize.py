@@ -186,4 +186,4 @@ def test_result_without_location_is_skipped(capsys):
 
 def test_unknown_scanner_raises():
     with pytest.raises(ValueError):
-        normalize_sarif({"runs": []}, "trivy")
+        normalize_sarif({"runs": []}, "totally-made-up-scanner")

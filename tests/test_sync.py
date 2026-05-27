@@ -130,6 +130,28 @@ def test_triage_failure_falls_back_to_deterministic_path():
     assert len(result.created) == 1  # deterministic fallback worked
 
 
+def test_labels_include_category_and_severity():
+    f = _f("R1", severity="high")
+    gh = _gh(existing=[])
+    sync([f], gh, parent_issue=42)
+    labels = gh.create_issue.call_args.kwargs.get("labels") or gh.create_issue.call_args.args[2]
+    assert "security" in labels
+    assert "secscan:sast" in labels
+    assert "secscan:high" in labels
+
+
+def test_labels_for_supply_chain_category():
+    f = Finding(
+        scanner="trivy", category="iac", rule_id="AVD-DS-0002", severity="medium",
+        file_path="Dockerfile", line=1, title="root user", message="m",
+    )
+    gh = _gh(existing=[])
+    sync([f], gh, parent_issue=42)
+    labels = gh.create_issue.call_args.kwargs.get("labels") or gh.create_issue.call_args.args[2]
+    assert "secscan:iac" in labels
+    assert "secscan:medium" in labels
+
+
 def test_uses_triage_prose_when_available():
     f = _f("R1")
     gh = _gh(existing=[])

@@ -1,0 +1,102 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Trivy",
+          "rules": [
+            {
+              "id": "CVE-2024-99991",
+              "name": "Vulnerability",
+              "shortDescription": {"text": "RCE in libfoo"},
+              "properties": {
+                "type": "vulnerability",
+                "security-severity": "9.8",
+                "tags": ["vulnerability", "CVE-2024-99991"]
+              }
+            },
+            {
+              "id": "AVD-DS-0002",
+              "name": "Dockerfile Misconfiguration",
+              "shortDescription": {"text": "Image user should not be root"},
+              "properties": {
+                "type": "misconfiguration",
+                "security-severity": "6.5",
+                "tags": ["misconfiguration", "iac", "Dockerfile"]
+              }
+            },
+            {
+              "id": "trivy.secret.aws-access-key",
+              "name": "AWS Access Key",
+              "shortDescription": {"text": "AWS Access Key found"},
+              "properties": {
+                "type": "secret",
+                "security-severity": "9.0",
+                "tags": ["secret"]
+              }
+            },
+            {
+              "id": "trivy.license.gpl",
+              "name": "GPL License",
+              "shortDescription": {"text": "GPL-3.0 license detected"},
+              "properties": {
+                "type": "license",
+                "security-severity": "5.0",
+                "tags": ["license"]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CVE-2024-99991",
+          "level": "error",
+          "message": {"text": "libfoo 1.0.0 has remote code execution"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": "package-lock.json"},
+              "region": {"startLine": 12}
+            }
+          }],
+          "properties": {"security-severity": "9.8"}
+        },
+        {
+          "ruleId": "AVD-DS-0002",
+          "level": "warning",
+          "message": {"text": "Specify at least 1 USER command in Dockerfile with non-root user"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": "Dockerfile"},
+              "region": {"startLine": 1}
+            }
+          }],
+          "properties": {"security-severity": "6.5"}
+        },
+        {
+          "ruleId": "trivy.secret.aws-access-key",
+          "level": "error",
+          "message": {"text": "AWS Access Key found"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": ".env.local"},
+              "region": {"startLine": 4}
+            }
+          }]
+        },
+        {
+          "ruleId": "trivy.license.gpl",
+          "level": "note",
+          "message": {"text": "GPL-3.0 dependency detected"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": "vendor/some-pkg/LICENSE"},
+              "region": {"startLine": 1}
+            }
+          }]
+        }
+      ]
+    }
+  ]
+}

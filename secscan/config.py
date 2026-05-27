@@ -24,6 +24,9 @@ class ScannersConfig:
     osv: bool = True
     gitleaks: bool = True
     semgrep: bool = True
+    trivy: bool = True          # comprehensive: vuln + secret + misconfig + license
+    trufflehog: bool = True     # verified secrets (validates live tokens)
+    syft: bool = True           # SBOM artifact (no sub-issues filed)
 
 
 @dataclass
@@ -109,6 +112,9 @@ def _from_dict(raw: dict) -> Config:
         osv=bool(scanners_raw.get("osv", True)),
         gitleaks=bool(scanners_raw.get("gitleaks", True)),
         semgrep=bool(scanners_raw.get("semgrep", True)),
+        trivy=bool(scanners_raw.get("trivy", True)),
+        trufflehog=bool(scanners_raw.get("trufflehog", True)),
+        syft=bool(scanners_raw.get("syft", True)),
     )
 
     paths_raw = raw.get("paths") or {}

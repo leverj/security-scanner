@@ -1,9 +1,10 @@
 # secscan — single-repo security scanner. Stateless. State lives in GitHub Issues.
 #
-# Volumes (mount at runtime):
+# Mount points (bind-mount at runtime — no VOLUME directive, so anonymous volumes
+# never accumulate when --rm is used):
 #   /config   ro   -> config.yaml
-#   /rules    ro   -> bundled semgrep rules (overrides the image-baked ones)
-#   /work     rw   -> ephemeral clone + scratch (tmpfs friendly)
+#   /rules    ro   -> optional override of the image-baked semgrep rules
+#   /work     rw   -> ephemeral clone + SBOM output (the container wipes it on exit)
 #
 # Secrets via env:  GITHUB_TOKEN, SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN+SLACK_CHANNEL_ID
 
@@ -13,6 +14,9 @@ FROM python:3.11-slim AS base
 ARG OSV_SCANNER_VERSION=1.9.2
 ARG GITLEAKS_VERSION=8.21.2
 ARG SEMGREP_VERSION=1.97.0
+ARG TRIVY_VERSION=0.57.0
+ARG TRUFFLEHOG_VERSION=3.83.7
+ARG SYFT_VERSION=1.16.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -25,7 +29,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # --- osv-scanner ----------------------------------------------------------
-# Releases publish prebuilt linux amd64/arm64 binaries; pick the right arch.
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -53,9 +56,58 @@ RUN set -eux; \
     chmod +x /usr/local/bin/gitleaks; \
     gitleaks version
 
-# --- semgrep (pip install — official distribution channel) ---------------
+# --- semgrep (pip — official channel) -------------------------------------
 RUN pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" \
     && semgrep --version
+
+# --- trivy (Aqua) — vuln + secret + iac + license, all in one ------------
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) tv_arch=Linux-64bit ;; \
+      arm64) tv_arch=Linux-ARM64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/trivy.tar.gz \
+      "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_${tv_arch}.tar.gz"; \
+    tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy; \
+    rm /tmp/trivy.tar.gz; \
+    chmod +x /usr/local/bin/trivy; \
+    trivy --version
+
+# Pre-cache the trivy DBs at build time so first-run is fast and offline-OK.
+# (The runner passes --skip-db-update.)
+RUN trivy image --download-db-only && trivy image --download-java-db-only
+
+# --- trufflehog — verified secret detection ------------------------------
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) th_arch=linux_amd64 ;; \
+      arm64) th_arch=linux_arm64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/trufflehog.tar.gz \
+      "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_${th_arch}.tar.gz"; \
+    tar -xzf /tmp/trufflehog.tar.gz -C /usr/local/bin trufflehog; \
+    rm /tmp/trufflehog.tar.gz; \
+    chmod +x /usr/local/bin/trufflehog; \
+    trufflehog --version
+
+# --- syft — SBOM generation ----------------------------------------------
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) sy_arch=linux_amd64 ;; \
+      arm64) sy_arch=linux_arm64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/syft.tar.gz \
+      "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_${sy_arch}.tar.gz"; \
+    tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft; \
+    rm /tmp/syft.tar.gz; \
+    chmod +x /usr/local/bin/syft; \
+    syft --version
 
 # --- secscan itself -------------------------------------------------------
 WORKDIR /app
@@ -64,14 +116,10 @@ COPY secscan /app/secscan
 COPY README.md /app/README.md
 RUN pip install --no-cache-dir /app
 
-# Bundled Semgrep rules — image-baked default; can be overridden by mounting /rules.
-COPY secscan/rules /opt/secscan/rules
-ENV SECSCAN_DEFAULT_RULES=/opt/secscan/rules
+# Make sure the mount points exist (no VOLUME directive — keeps `--rm` from
+# leaving anonymous volumes behind on each run).
+RUN mkdir -p /config /rules /work
 
-VOLUME ["/config", "/rules", "/work"]
-ENV SECSCAN_WORK_DIR=/work
-
-# Default entrypoint runs the scanner against /config/config.yaml. Override with
-# --dry-run, --work-dir, etc. via `docker run ... secscan --dry-run`.
+# Default entrypoint runs the scanner against /config/config.yaml.
 ENTRYPOINT ["python", "-m", "secscan", "--config", "/config/config.yaml", "--work-dir", "/work"]
 CMD []

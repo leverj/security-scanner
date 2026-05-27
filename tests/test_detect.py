@@ -2,7 +2,10 @@ from pathlib import Path
 
 from secscan.detect import ScannerTarget, detect_stack
 
-ALL_ON = {"osv": True, "gitleaks": True, "semgrep": True}
+ALL_ON = {
+    "osv": True, "gitleaks": True, "semgrep": True,
+    "trivy": True, "trufflehog": True, "syft": True,
+}
 
 
 def _touch(p: Path, content: str = "") -> Path:
