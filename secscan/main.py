@@ -257,6 +257,8 @@ def _log_detection(d: DetectionResult) -> None:
     for t in d.targets:
         eco = f"/{t.ecosystem}" if t.ecosystem else ""
         print(f"  - {t.scanner}{eco}: {len(t.targets)} target(s)", file=sys.stderr)
+    for fw in d.detected_frameworks:
+        print(f"  + framework: {fw} (scoped ruleset applies)", file=sys.stderr)
     for note in d.detected_no_scanner:
         print(f"  ! {note}", file=sys.stderr)
 

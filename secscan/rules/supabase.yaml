@@ -1,0 +1,141 @@
+rules:
+  # ---- Supabase migration SQL: RLS, policies, grants -----------------------
+  # These rules use generic mode so they apply to .sql files. They're scoped to
+  # supabase/migrations/ paths so a project that happens to have similar SQL
+  # in unrelated migrations doesn't fire.
+
+  - id: supabase.rls-disabled-on-public-table
+    message: |
+      `ALTER TABLE ... DISABLE ROW LEVEL SECURITY` on a `public.` table makes every row reachable by
+      the anon API key. This is exactly what Supabase Studio's Security Advisor flags as critical.
+      Keep RLS enabled and add explicit policies, or move the table out of `public`.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-284: Improper Access Control"
+      security-severity: "9.1"
+    languages: [generic]
+    paths:
+      include:
+        - "supabase/migrations/*"
+    patterns:
+      - pattern-either:
+          - pattern: alter table public.$T disable row level security
+          - pattern: ALTER TABLE public.$T DISABLE ROW LEVEL SECURITY
+          - pattern: alter table "public".$T disable row level security
+          - pattern: ALTER TABLE "public".$T DISABLE ROW LEVEL SECURITY
+
+  - id: supabase.policy-using-true
+    message: |
+      `CREATE POLICY ... USING (true)` makes the policy match every row — equivalent to disabling RLS
+      for that operation. Constrain by `auth.uid()`, `auth.role()`, or a column predicate.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-284: Improper Access Control"
+      security-severity: "8.6"
+    languages: [generic]
+    paths:
+      include:
+        - "supabase/migrations/*"
+    patterns:
+      - pattern-either:
+          - pattern: create policy ... using (true)
+          - pattern: CREATE POLICY ... USING (true)
+          - pattern: create policy ... with check (true)
+          - pattern: CREATE POLICY ... WITH CHECK (true)
+
+  - id: supabase.grant-all-to-anon
+    message: |
+      Granting on a table to the `anon` role exposes it to anyone with the public anon key.
+      Prefer granting to `authenticated` and rely on RLS policies for row-level access.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-732: Incorrect Permission Assignment"
+      security-severity: "7.5"
+    languages: [generic]
+    paths:
+      include:
+        - "supabase/migrations/*"
+    patterns:
+      - pattern-either:
+          - pattern: grant all ... to anon
+          - pattern: GRANT ALL ... TO anon
+          - pattern: grant insert ... to anon
+          - pattern: GRANT INSERT ... TO anon
+          - pattern: grant update ... to anon
+          - pattern: GRANT UPDATE ... TO anon
+          - pattern: grant delete ... to anon
+          - pattern: GRANT DELETE ... TO anon
+
+  # NOTE: SECURITY DEFINER without pinned search_path is a real risk but is hard
+  # to detect reliably in semgrep generic mode (the `set search_path` clause can
+  # appear before or after the body). The live Supabase Security Advisor catches
+  # this far more accurately than static rules — tracked in the live-mode epic.
+
+  # ---- Supabase client-side code -------------------------------------------
+
+  - id: supabase.service-role-key-in-client
+    message: |
+      `SUPABASE_SERVICE_ROLE_KEY` referenced from a client-bundled path bypasses RLS entirely. If this
+      module reaches the browser, every table becomes publicly read/writable. Move the read to a
+      server-only file (`pages/api/`, `app/**/route.ts`, `*.server.ts`).
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      security-severity: "9.1"
+    languages: [javascript, typescript]
+    paths:
+      include:
+        - "**/components/**"
+        - "**/pages/**"
+        - "**/app/**"
+        - "**/src/**"
+      exclude:
+        - "**/api/**"
+        - "**/server/**"
+        - "**/*.server.*"
+        - "**/route.ts"
+        - "**/route.js"
+    patterns:
+      - pattern-either:
+          - pattern: process.env.SUPABASE_SERVICE_ROLE_KEY
+          - pattern: process.env.SERVICE_ROLE_KEY
+          - pattern: import.meta.env.SUPABASE_SERVICE_ROLE_KEY
+          - pattern: import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
+          - pattern: import.meta.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
+          - pattern: process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
+
+  - id: supabase.create-client-disable-rls
+    message: |
+      `createClient(...)` with `auth: { persistSession: false }` plus the service role key is fine on
+      a server, but the same pattern in a `pages/`, `app/`, `src/components/`, or `public/` path means
+      a service-role client is being instantiated in browser-bundled code. Move to an API route.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-200: Exposure of Sensitive Information"
+      security-severity: "7.5"
+    languages: [javascript, typescript]
+    paths:
+      include:
+        - "**/components/**"
+        - "**/pages/**"
+        - "**/app/**"
+        - "**/src/**"
+      exclude:
+        - "**/api/**"
+        - "**/server/**"
+        - "**/*.server.*"
+        - "**/route.ts"
+        - "**/route.js"
+    patterns:
+      - pattern-either:
+          - pattern: createClient($URL, process.env.SUPABASE_SERVICE_ROLE_KEY, ...)
+          - pattern: createClient($URL, process.env.SERVICE_ROLE_KEY, ...)
+          - pattern: createClient($URL, $SERVICE_ROLE_KEY)
+      - metavariable-regex:
+          metavariable: $SERVICE_ROLE_KEY
+          regex: "(?i).*service[_-]?role.*"

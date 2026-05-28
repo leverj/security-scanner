@@ -1,0 +1,156 @@
+rules:
+  - id: sqli.python-cursor-execute-fstring
+    message: |
+      `cursor.execute(f"...")` with an f-string interpolating non-literal values is the classic
+      SQL-injection pattern. Use parameterized queries: `cursor.execute("... %s ...", (val,))`.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute(f"...{$X}...", ...)
+          - pattern: $CUR.executemany(f"...{$X}...", ...)
+          - pattern: $CUR.executescript(f"...{$X}...")
+          - pattern: $CONN.execute(f"...{$X}...", ...)
+
+  - id: sqli.python-cursor-execute-percent
+    message: |
+      `cursor.execute("... %s ..." % $X)` builds SQL via Python string formatting — SQL injection.
+      Pass parameters as a tuple: `cursor.execute("... %s ...", (val,))`. Note the comma vs `%`.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute("..." % $X, ...)
+          - pattern: $CUR.execute("..." % ($X, ...), ...)
+          - pattern: $CONN.execute("..." % $X, ...)
+          - pattern: $CONN.execute("..." % ($X, ...), ...)
+
+  - id: sqli.python-cursor-execute-format
+    message: |
+      `cursor.execute("...".format($X))` interpolates values into SQL with `str.format` — SQL injection.
+      Use parameterized queries with placeholders instead.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute("...".format(...), ...)
+          - pattern: $CONN.execute("...".format(...), ...)
+
+  - id: sqli.python-cursor-execute-concat
+    message: |
+      `cursor.execute("..." + $X)` concatenates a variable into the SQL string — SQL injection.
+      Switch to parameterized queries.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute("..." + $X, ...)
+          - pattern: $CUR.execute($X + "...", ...)
+          - pattern: $CONN.execute("..." + $X, ...)
+          - pattern: $CONN.execute($X + "...", ...)
+
+  - id: sqli.js-template-literal-query
+    message: |
+      `db.query(`... ${$X} ...`)` interpolates a variable into the SQL template literal — SQL injection.
+      Use the driver's parameterized form: `db.query("... ? ...", [val])` or the named-param variant.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query(`...${$X}...`, ...)
+          - pattern: $DB.execute(`...${$X}...`, ...)
+          - pattern: $DB.queryRaw(`...${$X}...`, ...)
+          - pattern: $DB.$unsafe(`...${$X}...`, ...)
+      - metavariable-regex:
+          metavariable: $DB
+          regex: "^(db|pool|connection|conn|client|knex|sequelize|prisma|sql)$"
+
+  - id: sqli.js-string-concat-query
+    message: |
+      `db.query("..." + $X)` concatenates a variable into the SQL string — SQL injection.
+      Use parameter placeholders (`?` / `$1`) and pass values as the second argument.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query("..." + $X, ...)
+          - pattern: $DB.query($X + "...", ...)
+          - pattern: $DB.execute("..." + $X, ...)
+          - pattern: $DB.execute($X + "...", ...)
+          - pattern: $DB.queryRaw("..." + $X, ...)
+          - pattern: $DB.queryRaw($X + "...", ...)
+      - metavariable-regex:
+          metavariable: $DB
+          regex: "^(db|pool|connection|conn|client|knex|sequelize|prisma|sql)$"
+
+  - id: sqli.js-knex-raw-template-literal
+    message: |
+      `knex.raw(`... ${$X} ...`)` / `.whereRaw(`... ${$X} ...`)` interpolates into raw SQL — SQL injection.
+      Use Knex bindings: `knex.raw("... ?", [val])` or the `??` identifier form.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $KNEX.raw(`...${$X}...`, ...)
+          - pattern: $QB.whereRaw(`...${$X}...`, ...)
+          - pattern: $QB.orderByRaw(`...${$X}...`, ...)
+          - pattern: $QB.havingRaw(`...${$X}...`, ...)
+
+  - id: sqli.js-sequelize-literal-template
+    message: |
+      `Sequelize.literal(`... ${$X} ...`)` injects the value verbatim into SQL — SQL injection.
+      Bind values via `replacements` / `bind` instead of `literal`.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: Sequelize.literal(`...${$X}...`)
+          - pattern: sequelize.literal(`...${$X}...`)
+          - pattern: literal(`...${$X}...`)
+
+  - id: sqli.python-sqlalchemy-text-fstring
+    message: |
+      `sqlalchemy.text(f"...{$X}...")` interpolates a variable into raw SQL — SQL injection.
+      Use bind parameters: `text("... :val ...").bindparams(val=...)`.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      security-severity: "9.8"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: sqlalchemy.text(f"...{$X}...")
+          - pattern: text(f"...{$X}...")

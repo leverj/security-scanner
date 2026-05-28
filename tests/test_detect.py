@@ -157,3 +157,25 @@ def test_deterministic_ordering(tmp_path):
     # And the OSV pair is sorted by relpath: 'a' before 'b'.
     osv_paths = [str(t.targets[0].relative_to(tmp_path)) for t in _scanners(r1, "osv")]
     assert osv_paths == ["a", "b"]
+
+
+def test_supabase_detected_via_config_toml(tmp_path):
+    _touch(tmp_path / "supabase" / "config.toml", "project_id = 'x'")
+    _touch(tmp_path / "supabase" / "migrations" / "001_init.sql", "select 1;")
+    r = detect_stack(tmp_path, ALL_ON)
+    assert "supabase" in r.detected_frameworks
+
+
+def test_supabase_detected_via_package_json(tmp_path):
+    _touch(tmp_path / "package.json", '{"dependencies": {"@supabase/supabase-js": "^2.0.0"}}')
+    _touch(tmp_path / "package-lock.json", "{}")
+    r = detect_stack(tmp_path, ALL_ON)
+    assert "supabase" in r.detected_frameworks
+
+
+def test_supabase_not_detected_when_absent(tmp_path):
+    _touch(tmp_path / "package.json", '{"dependencies": {"react": "^18"}}')
+    _touch(tmp_path / "package-lock.json", "{}")
+    _touch(tmp_path / "config.toml", "foo = 'bar'")  # not under supabase/
+    r = detect_stack(tmp_path, ALL_ON)
+    assert "supabase" not in r.detected_frameworks

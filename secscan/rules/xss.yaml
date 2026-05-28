@@ -1,0 +1,150 @@
+rules:
+  - id: xss.react-dangerously-set-inner-html
+    message: |
+      `dangerouslySetInnerHTML` with non-constant `__html` is the canonical React XSS sink.
+      Pass plain text (children) or sanitize via DOMPurify before rendering.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "7.5"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: |
+              <$EL dangerouslySetInnerHTML={{__html: $X}} />
+          - pattern: |
+              <$EL dangerouslySetInnerHTML={{__html: $X}}>$$$CHILDREN</$EL>
+      - pattern-not: |
+          <$EL dangerouslySetInnerHTML={{__html: "..."}} />
+      - pattern-not: |
+          <$EL dangerouslySetInnerHTML={{__html: "..."}}>$$$CHILDREN</$EL>
+
+  - id: xss.document-write
+    message: |
+      `document.write($X)` with non-constant content writes raw HTML into the document, enabling XSS.
+      Use `textContent`, `createElement`, or a sanitizer.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "7.5"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: document.write($X)
+          - pattern: document.writeln($X)
+      - pattern-not: document.write("...")
+      - pattern-not: document.writeln("...")
+
+  - id: xss.jquery-html-sink
+    message: |
+      `$(...).html($X)` / `.append($X)` / `.prepend($X)` / `.after($X)` / `.before($X)` with non-constant
+      input renders raw HTML and enables XSS. Use `.text($X)` or sanitize first.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "6.1"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $EL.html($X)
+          - pattern: $EL.append($X)
+          - pattern: $EL.prepend($X)
+          - pattern: $EL.after($X)
+          - pattern: $EL.before($X)
+      - pattern-not: $EL.html("...")
+      - pattern-not: $EL.append("...")
+      - pattern-not: $EL.prepend("...")
+      - pattern-not: $EL.after("...")
+      - pattern-not: $EL.before("...")
+      - pattern-not: $EL.html()
+      - metavariable-regex:
+          metavariable: $EL
+          regex: "^\\$"
+
+  - id: xss.location-assign-from-input
+    message: |
+      Assigning user-controlled input to `location` / `location.href` enables `javascript:`-URL XSS
+      and open-redirect. Validate against an allowlist of paths or origins.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "5.4"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: location.href = $X
+          - pattern: window.location.href = $X
+          - pattern: window.location = $X
+          - pattern: location.assign($X)
+          - pattern: location.replace($X)
+      - pattern-not: location.href = "..."
+      - pattern-not: window.location.href = "..."
+      - pattern-not: window.location = "..."
+      - pattern-not: location.assign("...")
+      - pattern-not: location.replace("...")
+
+  - id: xss.outer-html-assign
+    message: |
+      Assigning to `outerHTML` with non-constant content rewrites the element with raw HTML — same
+      DOM-XSS sink as `innerHTML`. Use `textContent` or sanitize via DOMPurify.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "6.1"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: $EL.outerHTML = $X
+      - pattern-not: $EL.outerHTML = "..."
+
+  - id: xss.insert-adjacent-html
+    message: |
+      `insertAdjacentHTML($_, $X)` with non-constant `$X` parses and inserts raw HTML — DOM XSS.
+      Use `insertAdjacentText` or sanitize.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "6.1"
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: $EL.insertAdjacentHTML($POS, $X)
+      - pattern-not: $EL.insertAdjacentHTML($POS, "...")
+
+  - id: xss.python-flask-render-template-string
+    message: |
+      `flask.render_template_string($X)` with non-constant input is server-side template injection,
+      which trivially becomes XSS/RCE. Use `render_template` with a fixed template file.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-94: Server-Side Template Injection"
+      security-severity: "9.0"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: flask.render_template_string($X, ...)
+          - pattern: render_template_string($X, ...)
+      - pattern-not: flask.render_template_string("...", ...)
+      - pattern-not: render_template_string("...", ...)
+
+  - id: xss.python-mark-safe-on-input
+    message: |
+      `mark_safe($X)` / `|safe` on non-constant input disables Django's auto-escaping and enables XSS.
+      Sanitize first or pass plain text and let auto-escape do its job.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      security-severity: "6.1"
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: mark_safe($X)
+          - pattern: django.utils.safestring.mark_safe($X)
+      - pattern-not: mark_safe("...")
+      - pattern-not: django.utils.safestring.mark_safe("...")

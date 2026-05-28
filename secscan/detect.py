@@ -66,6 +66,7 @@ class ScannerTarget:
 class DetectionResult:
     targets: list[ScannerTarget] = field(default_factory=list)
     detected_no_scanner: list[str] = field(default_factory=list)
+    detected_frameworks: list[str] = field(default_factory=list)
 
 
 def _norm_rel(p: Path, root: Path) -> str:
@@ -108,13 +109,16 @@ def _is_excluded(rel: str, patterns: list[str]) -> bool:
     return False
 
 
-def _walk(root: Path, exclude: list[str]) -> tuple[dict[Path, set[str]], set[str], bool]:
+def _walk(root: Path, exclude: list[str]) -> tuple[dict[Path, set[str]], set[str], bool, set[str]]:
     """Single os.walk: collect (dir -> set of lockfile names), unscanned-manifest notes,
-    and whether any semgrep-compatible source file exists.
+    whether any semgrep-compatible source file exists, and detected framework hints
+    (e.g. "supabase"). Frameworks unlock additional scoped rule packs without changing
+    which scanners run.
     """
     by_dir: dict[Path, set[str]] = {}
     notes: set[str] = set()
     has_source = False
+    frameworks: set[str] = set()
 
     for dirpath, dirnames, filenames in os.walk(root):
         d = Path(dirpath)
@@ -140,8 +144,17 @@ def _walk(root: Path, exclude: list[str]) -> tuple[dict[Path, set[str]], set[str
                 ext = os.path.splitext(fname)[1].lower()
                 if ext in _SEMGREP_EXTS:
                     has_source = True
+            if "supabase" not in frameworks:
+                if fname == "config.toml" and d.name == "supabase":
+                    frameworks.add("supabase")
+                elif fname == "package.json":
+                    try:
+                        if "@supabase/" in (d / fname).read_text(errors="ignore"):
+                            frameworks.add("supabase")
+                    except OSError:
+                        pass
 
-    return by_dir, notes, has_source
+    return by_dir, notes, has_source, frameworks
 
 
 def _ecosystems_for_dir(d: Path, lockfiles: set[str]) -> list[str]:
@@ -195,7 +208,7 @@ def detect_stack(
     `scanners_enabled` keys: "osv", "gitleaks", "semgrep". Missing keys = False.
     """
     exclude = list(exclude or [])
-    by_dir, unscanned_notes, has_source = _walk(root, exclude)
+    by_dir, unscanned_notes, has_source, frameworks = _walk(root, exclude)
 
     osv_on = bool(scanners_enabled.get("osv"))
     gitleaks_on = bool(scanners_enabled.get("gitleaks"))
@@ -256,4 +269,8 @@ def detect_stack(
     # Deterministic ordering: (scanner, ecosystem or "", first target relpath).
     targets.sort(key=lambda t: (t.scanner, t.ecosystem or "", _norm_rel(t.targets[0], root)))
 
-    return DetectionResult(targets=targets, detected_no_scanner=notes)
+    return DetectionResult(
+        targets=targets,
+        detected_no_scanner=notes,
+        detected_frameworks=sorted(frameworks),
+    )
