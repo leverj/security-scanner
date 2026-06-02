@@ -26,7 +26,47 @@ class ScannersConfig:
     semgrep: bool = True
     trivy: bool = True          # comprehensive: vuln + secret + misconfig + license
     trufflehog: bool = True     # verified secrets (validates live tokens)
-    syft: bool = True           # SBOM artifact (no sub-issues filed)
+    syft: bool = True           # SBOM artifact (no project items filed)
+    # LLM-driven SAST. Both default OFF — they consume external compute
+    # (Codex subscription quota, Gemma GPU time) and produce noisier findings
+    # than the deterministic scanners. Enable to add depth coverage.
+    codex: bool = False         # OpenAI Codex via local `codex` CLI (subscription)
+    gemma: bool = False         # Local Gemma 4 via Ollama
+
+
+@dataclass
+class CodexConfig:
+    """Tunables for the local Codex CLI runner. Auth is via `codex login`
+    (ChatGPT subscription); secscan never sees an API key."""
+    binary: str = "codex"
+    model: str | None = None    # None => use codex's configured default
+    timeout: int = 1200         # seconds; LLM scans can run minutes
+
+
+@dataclass
+class GemmaScannerConfig:
+    """Tunables for the Ollama-backed Gemma SAST runner.
+
+    By default this shares the Ollama URL/model with the existing triage
+    config (so you only configure Ollama once). You can override here when
+    you want a different model for primary SAST vs. validator triage.
+    """
+    base_url: str | None = None  # falls back to triage.base_url
+    model: str | None = None     # falls back to triage.model
+    keep_alive: str | None = None
+    timeout: int = 1800
+    max_files: int = 60
+    max_file_bytes: int = 12_000
+    max_total_bytes: int = 200_000
+
+
+@dataclass
+class CrossValidateConfig:
+    """Bidirectional review: Codex reviews Gemma findings, Gemma reviews Codex.
+    No effect unless BOTH scanners.codex and scanners.gemma are enabled."""
+    enabled: bool = True
+    codex_timeout: int = 300    # per-finding budget when codex reviews a gemma finding
+    gemma_timeout: int = 180    # per-finding budget when gemma reviews a codex finding
 
 
 @dataclass
@@ -97,6 +137,9 @@ class Config:
     severity_floor: str
     triage: TriageConfig
     slack: SlackConfig
+    codex: CodexConfig = field(default_factory=CodexConfig)
+    gemma: GemmaScannerConfig = field(default_factory=GemmaScannerConfig)
+    cross_validate: CrossValidateConfig = field(default_factory=CrossValidateConfig)
     # bundled defaults
     semgrep_rules_dir: str | None = None
 
@@ -156,6 +199,33 @@ def _from_dict(raw: dict) -> Config:
         trivy=bool(scanners_raw.get("trivy", True)),
         trufflehog=bool(scanners_raw.get("trufflehog", True)),
         syft=bool(scanners_raw.get("syft", True)),
+        codex=bool(scanners_raw.get("codex", False)),
+        gemma=bool(scanners_raw.get("gemma", False)),
+    )
+
+    codex_raw = raw.get("codex") or {}
+    codex_cfg = CodexConfig(
+        binary=str(codex_raw.get("binary") or "codex"),
+        model=(str(codex_raw.get("model")) if codex_raw.get("model") else None),
+        timeout=int(codex_raw.get("timeout") or 1200),
+    )
+
+    gemma_raw = raw.get("gemma") or {}
+    gemma_cfg = GemmaScannerConfig(
+        base_url=(str(gemma_raw.get("base_url")) if gemma_raw.get("base_url") else None),
+        model=(str(gemma_raw.get("model")) if gemma_raw.get("model") else None),
+        keep_alive=(str(gemma_raw.get("keep_alive")) if gemma_raw.get("keep_alive") else None),
+        timeout=int(gemma_raw.get("timeout") or 1800),
+        max_files=int(gemma_raw.get("max_files") or 60),
+        max_file_bytes=int(gemma_raw.get("max_file_bytes") or 12_000),
+        max_total_bytes=int(gemma_raw.get("max_total_bytes") or 200_000),
+    )
+
+    cv_raw = raw.get("cross_validate") or {}
+    cv_cfg = CrossValidateConfig(
+        enabled=bool(cv_raw.get("enabled", True)),
+        codex_timeout=int(cv_raw.get("codex_timeout") or 300),
+        gemma_timeout=int(cv_raw.get("gemma_timeout") or 180),
     )
 
     paths_raw = raw.get("paths") or {}
@@ -202,5 +272,8 @@ def _from_dict(raw: dict) -> Config:
         severity_floor=floor,
         triage=triage,
         slack=slack,
+        codex=codex_cfg,
+        gemma=gemma_cfg,
+        cross_validate=cv_cfg,
         semgrep_rules_dir=raw.get("semgrep_rules_dir"),
     )

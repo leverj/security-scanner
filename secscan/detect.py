@@ -216,6 +216,8 @@ def detect_stack(
     trivy_on = bool(scanners_enabled.get("trivy"))
     trufflehog_on = bool(scanners_enabled.get("trufflehog"))
     syft_on = bool(scanners_enabled.get("syft"))
+    codex_on = bool(scanners_enabled.get("codex"))
+    gemma_on = bool(scanners_enabled.get("gemma"))
 
     targets: list[ScannerTarget] = []
     notes: list[str] = []
@@ -261,6 +263,11 @@ def detect_stack(
         targets.append(ScannerTarget(scanner="trufflehog", ecosystem=None, targets=[root]))
     if syft_on:
         targets.append(ScannerTarget(scanner="syft", ecosystem=None, targets=[root]))
+    # LLM-driven SAST: only worth running on repos that actually have source.
+    if codex_on and has_source:
+        targets.append(ScannerTarget(scanner="codex", ecosystem=None, targets=[root]))
+    if gemma_on and has_source:
+        targets.append(ScannerTarget(scanner="gemma", ecosystem=None, targets=[root]))
 
     # Unscanned ecosystems (Java, PHP, Dart, ...) — always note, scanner-agnostic.
     for label in sorted(unscanned_notes):
