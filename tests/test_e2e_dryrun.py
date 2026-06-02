@@ -20,11 +20,13 @@ import pytest
 from secscan.config import (
     Config,
     PathsConfig,
+    ProjectConfig,
     ScannersConfig,
     SlackConfig,
     TriageConfig,
 )
 from secscan.fingerprint import parse_marker, resolve_fingerprint
+from secscan.github import ProjectContext, ProjectField
 from secscan.normalize import normalize_sarif
 from secscan.runners import RunnerResult
 
@@ -127,7 +129,7 @@ def cfg(tmp_path):
     return Config(
         repo="owner/demo",
         ref="main",
-        parent_issue=999,
+        project=ProjectConfig(owner="owner", number=7),
         github_token="ghp_fake_e2e",
         scanners=ScannersConfig(osv=True, gitleaks=True, semgrep=True),
         paths=PathsConfig(exclude=[]),
@@ -138,27 +140,46 @@ def cfg(tmp_path):
     )
 
 
-def _make_fake_gh(state="open", existing_with_fp: list[str] | None = None) -> MagicMock:
+def _project_ctx():
+    return ProjectContext(
+        id="PVT_x",
+        owner="owner",
+        number=7,
+        severity=ProjectField(id="SEV", options={
+            "critical": "o-c", "high": "o-h", "medium": "o-m", "low": "o-l", "info": "o-i",
+        }),
+        category=ProjectField(id="CAT", options={
+            "dependency": "o-d", "secret": "o-s", "sast": "o-a", "iac": "o-ia", "license": "o-li",
+        }),
+    )
+
+
+def _make_fake_gh(state="OPEN", existing_with_fp: list[str] | None = None) -> MagicMock:
     """Return a MagicMock GitHub that captures every create_issue call for inspection."""
     captured: list[dict] = []
     existing = []
     if existing_with_fp:
-        # Synthesize existing sub-issues whose bodies already contain those fingerprints.
+        # Synthesize existing project items whose bodies already contain those fingerprints.
         for i, fp in enumerate(existing_with_fp):
             existing.append({
+                "item_id": f"OLD_ITEM_{i}",
+                "content_id": f"I_{1000 + i}",
                 "number": i + 1,
                 "state": state,
                 "title": "old",
                 "body": f"prose\n<!-- secscan: fp={fp} rule=R cat=sast -->",
-                "id": 1000 + i,
             })
 
     fake_gh = MagicMock()
     fake_gh.dry_run = True
-    fake_gh.list_subissues.return_value = existing
+    fake_gh.resolve_project.return_value = _project_ctx()
+    fake_gh.list_project_items.return_value = existing
+    fake_gh.add_to_project.side_effect = lambda pid, nid: f"ITEM_{nid}"
+    fake_gh.set_project_field.return_value = None
 
     def create(title, body, labels=None):
         issue = {"number": len(captured) + 100, "id": 1001 + len(captured),
+                 "node_id": f"I_NEW_{len(captured)}",
                  "title": title, "body": body, "html_url": "<dry-run>"}
         captured.append(issue)
         return issue
@@ -188,8 +209,8 @@ def test_full_dryrun_pipeline_files_three_findings(cfg, tmp_path):
 
 
 def test_dryrun_does_not_post_to_real_github(cfg, tmp_path):
-    """Even though create_issue is called on the mock, in a real run dry_run=True
-    on the actual GitHub class avoids any HTTP POST. We verify the mock matches."""
+    """The actual GitHub class in dry_run mode must make zero HTTP requests across
+    issue creation AND every Projects v2 mutation."""
     from secscan.github import GitHub
 
     captured_requests = []
@@ -201,11 +222,16 @@ def test_dryrun_does_not_post_to_real_github(cfg, tmp_path):
         raise AssertionError("dry-run made an HTTP request")
 
     with patch.object(real_gh.session, "request", side_effect=fake_request):
+        ctx = real_gh.resolve_project("owner", 7)
+        items = real_gh.list_project_items(ctx.id)
         issue = real_gh.create_issue("t", "b")
-        real_gh.link_subissue(999, issue)
+        item_id = real_gh.add_to_project(ctx.id, issue["node_id"])
+        real_gh.set_project_field(ctx.id, item_id, ctx.severity, "critical")
 
     assert captured_requests == []  # zero HTTP calls in dry-run
+    assert items == []
     assert issue["html_url"] == "<dry-run>"
+    assert item_id.startswith("DRY_RUN_ITEM_")
 
 
 def test_marker_roundtrip_on_dryrun_bodies(cfg, tmp_path):
@@ -226,13 +252,13 @@ def test_marker_roundtrip_on_dryrun_bodies(cfg, tmp_path):
 
 
 def test_closed_existing_fingerprint_suppresses_refile(cfg, tmp_path):
-    """The spec invariant: a closed sub-issue with our fingerprint never refiles."""
+    """The spec invariant: a closed project item with our fingerprint never refiles."""
     from secscan.main import run
 
     findings = normalize_sarif(_semgrep_sarif(), "semgrep")
     semgrep_fp = resolve_fingerprint(findings[0])
 
-    fake_gh = _make_fake_gh(state="closed", existing_with_fp=[semgrep_fp])
+    fake_gh = _make_fake_gh(state="CLOSED", existing_with_fp=[semgrep_fp])
 
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \

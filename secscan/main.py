@@ -1,6 +1,6 @@
 """Orchestrator: config -> clone -> detect -> run -> normalize -> sync -> notify.
 
-Fail-fast on missing token / parent_issue (handled in config.load_config). A
+Fail-fast on missing token / project config (handled in config.load_config). A
 scanner that did NOT complete contributes ZERO findings — so a crashed scanner
 can never look like "all clear" to downstream tooling.
 """
@@ -27,7 +27,7 @@ from secscan.sync import SyncResult, sync
 def cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="secscan",
-        description="Stateless single-repo security scanner; files findings as GitHub sub-issues.",
+        description="Stateless single-repo security scanner; files findings into a GitHub Projects v2 board.",
     )
     parser.add_argument("--config", required=True, help="Path to config.yaml")
     parser.add_argument("--dry-run", action="store_true", help="Detect/scan/normalize but do not create any GitHub issues")
@@ -80,9 +80,22 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
 
         triage = _maybe_triage(cfg)
 
+        # Resolve the Projects v2 target (and ensure Severity/Category fields exist).
+        # Fails fast with a clear message if the PAT lacks the 'project' scope or
+        # the project number is wrong.
+        project = gh.resolve_project(cfg.project.owner, cfg.project.number)
+        print(
+            f"project: {cfg.project.owner}/projects/{cfg.project.number} resolved",
+            file=sys.stderr,
+        )
+
         if dry_run:
-            print(f"DRY-RUN: would sync {len(findings)} findings against parent #{cfg.parent_issue}", file=sys.stderr)
-        result = sync(findings, gh, cfg.parent_issue, severity_floor=cfg.severity_floor, triage=triage)
+            print(
+                f"DRY-RUN: would sync {len(findings)} findings into "
+                f"{cfg.project.owner}/projects/{cfg.project.number}",
+                file=sys.stderr,
+            )
+        result = sync(findings, gh, project, severity_floor=cfg.severity_floor, triage=triage)
 
         # Slack digest (additive, never blocking). We hand it the ACTIONABLE
         # findings (the ones we actually filed); notify._default_digest also
@@ -90,14 +103,15 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         if cfg.slack.enabled:
             intro = (
                 triage.write_slack_intro(
-                    result.created_findings, result, cfg.repo, cfg.ref, cfg.parent_issue
+                    result.created_findings, result, cfg.repo, cfg.ref,
+                    cfg.project.owner, cfg.project.number,
                 )
                 if (triage and triage.enabled)
                 else None
             )
             post_digest(
                 cfg.slack, result.created_findings, result,
-                cfg.repo, cfg.ref, cfg.parent_issue, intro=intro,
+                cfg.repo, cfg.ref, cfg.project.owner, cfg.project.number, intro=intro,
             )
 
         _print_summary(result, completed_scanners, failed, dry_run)

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from secscan.config import (
     Config,
     PathsConfig,
+    ProjectConfig,
     ScannersConfig,
     SlackConfig,
     TriageConfig,
@@ -20,7 +21,8 @@ from secscan.main import _has_rule_files, _resolve_semgrep_rules
 
 def _cfg(rules=None):
     return Config(
-        repo="o/r", ref="main", parent_issue=1,
+        repo="o/r", ref="main",
+        project=ProjectConfig(owner="o", number=1),
         github_token="t",
         scanners=ScannersConfig(),
         paths=PathsConfig(),

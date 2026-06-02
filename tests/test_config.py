@@ -15,13 +15,16 @@ def test_load_minimal_config(tmp_path, monkeypatch):
     p = write(tmp_path, "c.yaml", """
 repo: "leverj/ezel"
 ref: "dev"
-parent_issue: 451
+project:
+  owner: "leverj"
+  number: 5
 """)
     cfg = load_config(p)
     assert cfg.repo == "leverj/ezel"
     assert cfg.repo_owner == "leverj"
     assert cfg.repo_name == "ezel"
-    assert cfg.parent_issue == 451
+    assert cfg.project.owner == "leverj"
+    assert cfg.project.number == 5
     assert cfg.severity_floor == "low"
     assert cfg.scanners.osv and cfg.scanners.gitleaks and cfg.scanners.semgrep
     assert cfg.github_token == "ghp_fake"
@@ -32,7 +35,9 @@ def test_load_full_config(tmp_path, monkeypatch):
     p = write(tmp_path, "c.yaml", """
 repo: "owner/name"
 ref: "main"
-parent_issue: 1
+project:
+  owner: "owner"
+  number: 1
 scanners: {osv: false, gitleaks: true, semgrep: false}
 paths: {exclude: ["a/", "b/"]}
 severity_floor: "high"
@@ -47,6 +52,8 @@ slack: {enabled: true, webhook_url_env: "SLACK_WEBHOOK_URL"}
     assert cfg.triage.enabled is True
     assert cfg.triage.model == "gemma4:9b"
     assert cfg.slack.enabled is True
+    assert cfg.project.owner == "owner"
+    assert cfg.project.number == 1
 
 
 def test_missing_token_env_fails_fast(tmp_path, monkeypatch):
@@ -54,7 +61,7 @@ def test_missing_token_env_fails_fast(tmp_path, monkeypatch):
     p = write(tmp_path, "c.yaml", """
 repo: "leverj/ezel"
 ref: "dev"
-parent_issue: 451
+project: {owner: "leverj", number: 5}
 """)
     with pytest.raises(ConfigError, match="GITHUB_TOKEN"):
         load_config(p)
@@ -65,7 +72,7 @@ def test_bad_repo_format_fails(tmp_path, monkeypatch):
     p = write(tmp_path, "c.yaml", """
 repo: "not-a-slash"
 ref: "dev"
-parent_issue: 1
+project: {owner: "x", number: 1}
 """)
     with pytest.raises(ConfigError, match="owner/name"):
         load_config(p)
@@ -76,20 +83,53 @@ def test_bad_severity_floor_fails(tmp_path, monkeypatch):
     p = write(tmp_path, "c.yaml", """
 repo: "o/n"
 ref: "dev"
-parent_issue: 1
+project: {owner: "o", number: 1}
 severity_floor: "bogus"
 """)
     with pytest.raises(ConfigError, match="severity_floor"):
         load_config(p)
 
 
-def test_missing_required_field_fails(tmp_path, monkeypatch):
+def test_missing_project_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "x")
     p = write(tmp_path, "c.yaml", """
 repo: "o/n"
 ref: "dev"
 """)
-    with pytest.raises(ConfigError, match="parent_issue"):
+    with pytest.raises(ConfigError, match="project"):
+        load_config(p)
+
+
+def test_missing_project_number_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    p = write(tmp_path, "c.yaml", """
+repo: "o/n"
+ref: "dev"
+project: {owner: "o"}
+""")
+    with pytest.raises(ConfigError, match="project.number"):
+        load_config(p)
+
+
+def test_missing_project_owner_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    p = write(tmp_path, "c.yaml", """
+repo: "o/n"
+ref: "dev"
+project: {number: 1}
+""")
+    with pytest.raises(ConfigError, match="project.owner"):
+        load_config(p)
+
+
+def test_non_integer_project_number_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    p = write(tmp_path, "c.yaml", """
+repo: "o/n"
+ref: "dev"
+project: {owner: "o", number: "not-a-number"}
+""")
+    with pytest.raises(ConfigError, match="project.number"):
         load_config(p)
 
 

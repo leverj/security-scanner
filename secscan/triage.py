@@ -159,7 +159,8 @@ class Triage:
         return title, body
 
     def write_slack_intro(
-        self, findings: list[Finding], result: SyncResult, repo: str, ref: str, parent_issue: int
+        self, findings: list[Finding], result: SyncResult, repo: str, ref: str,
+        project_owner: str, project_number: int,
     ) -> str | None:
         """Generate a one-sentence framing line that the notifier prepends to
         the deterministic per-category digest. If the model isn't warm in time,
@@ -185,7 +186,7 @@ class Triage:
         summary = {
             "repo": repo,
             "ref": ref,
-            "parent_issue": parent_issue,
+            "project": f"{project_owner}/projects/{project_number}",
             "created": len(result.created),
             "skipped_dup": result.skipped_dup,
             "skipped_floor": result.skipped_floor,

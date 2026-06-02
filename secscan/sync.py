@@ -1,4 +1,4 @@
-"""Create-decision logic. Dedup against existing sub-issues, file new ones.
+"""Create-decision logic. Dedup against existing project items, file new ones.
 
 The deterministic marker is always injected by code, regardless of whether the
 issue prose came from a template or from Gemma. The model never owns identity.
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from secscan.fingerprint import inject_marker, parse_marker, resolve_fingerprint
-from secscan.github import GitHub
+from secscan.github import GitHub, ProjectContext
 from secscan.models import Finding
 
 
@@ -66,22 +66,23 @@ def default_issue(f: Finding) -> tuple[str, str]:
 def sync(
     findings: list[Finding],
     gh: GitHub,
-    parent_issue: int,
+    project: ProjectContext,
     severity_floor: str = "low",
     triage: Triage | None = None,
 ) -> SyncResult:
     """Dedup -> create-only. Never edits/closes/reopens.
 
-    - Dedup against ALL existing sub-issues (open + closed).
+    - Dedup against ALL existing project items (open + closed) — the project is
+      the flat source of truth; there's no parent/child epic any more.
     - Marker is always injected by code.
     - Within a single run, the in-memory set prevents intra-run dupes too.
     """
     result = SyncResult(total_findings=len(findings))
 
-    existing_issues = gh.list_subissues(parent_issue)
+    existing_items = gh.list_project_items(project.id)
     existing_fps: set[str] = set()
-    for issue in existing_issues:
-        marker = parse_marker(issue.get("body"))
+    for it in existing_items:
+        marker = parse_marker(it.get("body"))
         if marker:
             existing_fps.add(marker["fp"])
 
@@ -99,7 +100,7 @@ def sync(
         # Optional fuzzy tie-break: catch renamed/moved code (different path -> different fp).
         if triage is not None and getattr(triage, "enabled", False):
             try:
-                if triage.is_duplicate_of_existing(f, existing_issues):
+                if triage.is_duplicate_of_existing(f, existing_items):
                     result.skipped_fuzzy_dup += 1
                     continue
             except Exception as e:
@@ -117,7 +118,9 @@ def sync(
 
         body = inject_marker(body, fp, f)
         issue = gh.create_issue(title, body, labels=_labels_for(f))
-        gh.link_subissue(parent_issue, issue)
+        item_id = gh.add_to_project(project.id, issue["node_id"])
+        gh.set_project_field(project.id, item_id, project.severity, f.severity)
+        gh.set_project_field(project.id, item_id, project.category, f.category)
         result.created.append(issue)
         result.created_findings.append(f)
         existing_fps.add(fp)

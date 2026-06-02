@@ -23,7 +23,8 @@ def post_digest(
     result: SyncResult,
     repo: str,
     ref: str,
-    parent_issue: int,
+    project_owner: str,
+    project_number: int,
     digest_text: str | None = None,
     intro: str | None = None,
 ) -> bool:
@@ -42,7 +43,7 @@ def post_digest(
     if digest_text:
         text = digest_text
     else:
-        text = _default_digest(findings, result, repo, ref, parent_issue)
+        text = _default_digest(findings, result, repo, ref, project_owner, project_number)
         if intro:
             text = f":speech_balloon: _{intro}_\n\n{text}"
 
@@ -106,7 +107,8 @@ _PER_SECTION_LIMIT = 5  # show top N findings per category to keep messages skim
 
 
 def _default_digest(
-    findings: list[Finding], result: SyncResult, repo: str, ref: str, parent_issue: int
+    findings: list[Finding], result: SyncResult, repo: str, ref: str,
+    project_owner: str, project_number: int,
 ) -> str:
     """Slack mrkdwn digest of ACTIONABLE findings (newly filed this run).
 
@@ -128,7 +130,11 @@ def _default_digest(
         by_cat.setdefault(f.category, []).append(f)
         by_sev[f.severity] = by_sev.get(f.severity, 0) + 1
 
-    lines: list[str] = [f":lock: *secscan* — `{repo}@{ref}` — parent #{parent_issue}"]
+    lines: list[str] = [
+        f":lock: *secscan* — `{repo}@{ref}` — "
+        f"<https://github.com/orgs/{project_owner}/projects/{project_number}|"
+        f"{project_owner}/projects/{project_number}>"
+    ]
 
     if not actionable:
         # Either truly clean OR everything was dup-skipped/below-floor.

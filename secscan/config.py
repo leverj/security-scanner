@@ -77,10 +77,20 @@ class SlackConfig:
 
 
 @dataclass
+class ProjectConfig:
+    """Target GitHub Projects v2 board. Findings file as flat items here — no
+    parent/child epic relationship. The owner is the org or user that owns the
+    project; `number` is the project number from the URL (`/projects/<number>`).
+    """
+    owner: str
+    number: int
+
+
+@dataclass
 class Config:
     repo: str
     ref: str
-    parent_issue: int
+    project: ProjectConfig
     github_token: str  # resolved from env; never logged
     scanners: ScannersConfig
     paths: PathsConfig
@@ -118,10 +128,16 @@ def _from_dict(raw: dict) -> Config:
     if "/" not in repo:
         raise ConfigError(f"config: 'repo' must be 'owner/name', got: {repo!r}")
     ref = str(_require(raw, "ref", ""))
+
+    project_raw = raw.get("project") or {}
+    if not isinstance(project_raw, dict):
+        raise ConfigError("config: 'project' must be a mapping with 'owner' and 'number'")
+    project_owner = str(_require(project_raw, "owner", "project"))
     try:
-        parent_issue = int(_require(raw, "parent_issue", ""))
+        project_number = int(_require(project_raw, "number", "project"))
     except (TypeError, ValueError) as e:
-        raise ConfigError(f"config: 'parent_issue' must be an integer: {e}") from e
+        raise ConfigError(f"config: 'project.number' must be an integer: {e}") from e
+    project = ProjectConfig(owner=project_owner, number=project_number)
 
     token_env = str(raw.get("github_token_env") or "GITHUB_TOKEN")
     token = os.environ.get(token_env, "")
@@ -179,7 +195,7 @@ def _from_dict(raw: dict) -> Config:
     return Config(
         repo=repo,
         ref=ref,
-        parent_issue=parent_issue,
+        project=project,
         github_token=token,
         scanners=scanners,
         paths=paths,
