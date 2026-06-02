@@ -70,6 +70,37 @@ class CrossValidateConfig:
 
 
 @dataclass
+class BuiltImageConfig:
+    """Mode C of the image-scan lane. Off by default.
+
+    Two sub-modes (mutually exclusive):
+      - `ref` — pull `<ref>` and scan it. Same trust boundary as `docker pull`.
+      - `build_locally` — `docker build .` the cloned repo, then scan. Requires
+        the docker socket mounted AND SECURITY_SCAN_ALLOW_BUILD=1 in env (since
+        docker build executes the repo's RUN lines, breaking the
+        "never execute repo code" invariant for this opt-in mode only).
+    """
+    enabled: bool = False
+    ref: str | None = None
+    build_locally: bool = False
+
+
+@dataclass
+class ImageScanConfig:
+    """Container image scanning lane. Three modes (epic #9):
+      A. Dockerfile audit  — handled by the existing trivy fs misconfig scanner.
+      B. base_images       — `trivy image` over every FROM ref in the repo's
+                             Dockerfiles. Default ON; cacheable.
+      C. built_image       — opt-in pull-or-build + scan; see BuiltImageConfig.
+    """
+    base_images: bool = True
+    built_image: BuiltImageConfig = field(default_factory=BuiltImageConfig)
+    timeout: int = 600           # per `trivy image` call
+    trivy_binary: str = "trivy"
+    docker_binary: str = "docker"
+
+
+@dataclass
 class PathsConfig:
     exclude: list[str] = field(default_factory=list)
 
@@ -140,6 +171,7 @@ class Config:
     codex: CodexConfig = field(default_factory=CodexConfig)
     gemma: GemmaScannerConfig = field(default_factory=GemmaScannerConfig)
     cross_validate: CrossValidateConfig = field(default_factory=CrossValidateConfig)
+    image_scan: ImageScanConfig = field(default_factory=ImageScanConfig)
     # bundled defaults
     semgrep_rules_dir: str | None = None
 
@@ -228,6 +260,20 @@ def _from_dict(raw: dict) -> Config:
         gemma_timeout=int(cv_raw.get("gemma_timeout") or 180),
     )
 
+    img_raw = raw.get("image_scan") or {}
+    built_raw = img_raw.get("built_image") or {}
+    image_scan_cfg = ImageScanConfig(
+        base_images=bool(img_raw.get("base_images", True)),
+        built_image=BuiltImageConfig(
+            enabled=bool(built_raw.get("enabled", False)),
+            ref=(str(built_raw.get("ref")) if built_raw.get("ref") else None),
+            build_locally=bool(built_raw.get("build_locally", False)),
+        ),
+        timeout=int(img_raw.get("timeout") or 600),
+        trivy_binary=str(img_raw.get("trivy_binary") or "trivy"),
+        docker_binary=str(img_raw.get("docker_binary") or "docker"),
+    )
+
     paths_raw = raw.get("paths") or {}
     paths = PathsConfig(exclude=list(paths_raw.get("exclude") or []))
 
@@ -275,5 +321,6 @@ def _from_dict(raw: dict) -> Config:
         codex=codex_cfg,
         gemma=gemma_cfg,
         cross_validate=cv_cfg,
+        image_scan=image_scan_cfg,
         semgrep_rules_dir=raw.get("semgrep_rules_dir"),
     )

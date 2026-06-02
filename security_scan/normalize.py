@@ -19,6 +19,7 @@ _CATEGORY = {
     "semgrep": "sast",
     "codex": "sast",
     "gemma": "sast",
+    "image": "image",
 }
 
 
@@ -32,6 +33,10 @@ def normalize_sarif(sarif: dict, scanner: str, exclude: list[str] | None = None)
     # Trivy multi-category SARIF.
     if scanner == "trivy":
         return _normalize_trivy(sarif, exclude)
+    # Image-scan SARIF (Trivy under the hood, but every finding belongs to
+    # `category: image` regardless of its sub-type).
+    if scanner == "image":
+        return _normalize_image(sarif, exclude)
     # Syft produces an SBOM artifact, not findings.
     if scanner == "syft":
         return []
@@ -106,6 +111,34 @@ def _trivy_category_for(rule_def: dict, result: dict) -> str:
     if rid.startswith(("AVD-", "KSV", "DS")):
         return "iac"
     return "dependency"
+
+
+# ---- Image scan: Trivy SARIF with image-ref provenance ---------------------
+
+
+def _normalize_image(sarif: dict, exclude: list[str]) -> list[Finding]:
+    """Image-scan findings: same SARIF shape as Trivy fs, but every finding is
+    tagged with `category: image` regardless of vuln/secret/etc. sub-type.
+    Carries the originating image ref + source (`base` or `built`) so the
+    project board can render and filter on them."""
+    findings: list[Finding] = []
+    for run in sarif.get("runs") or []:
+        rules_by_id = _index_rules(run)
+        for result in run.get("results") or []:
+            f = _result_to_finding(result, "image", "image", rules_by_id)
+            if f is None:
+                continue
+            props = result.get("properties") or {}
+            ref = props.get("security_scan_image_ref")
+            source = props.get("security_scan_image_source")
+            if ref:
+                f.extra["image_ref"] = ref
+            if source:
+                f.extra["image_source"] = source
+            # file_path for image findings is the package name (e.g. `openssl`)
+            # — keep it but skip the exclude check, which is for repo paths.
+            findings.append(f)
+    return findings
 
 
 # ---- Trufflehog: JSONL with verified-secret semantics ----------------------
