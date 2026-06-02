@@ -166,6 +166,43 @@ def test_runner_drops_findings_without_file(tmp_path):
     assert paths == ["src/auth.py"]
 
 
+def test_runner_redacts_secrets_in_source_before_sending(tmp_path):
+    """Source files containing AWS/GitHub tokens or high-entropy blobs must not
+    leave the box verbatim — they're rewritten to <REDACTED:...> in the prompt
+    body before it hits Ollama."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "creds.py").write_text(
+        "AWS_KEY = 'AKIAIOSFODNN7EXAMPLE'\n"
+        "GH = 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"
+        "BLOB = 'f4Z7q2pHk8wT3sNcRy9LbVxJgQmDeAo5'\n"
+    )
+    captured = {}
+
+    def _capture(*args, **kwargs):
+        captured["body"] = kwargs["json"]
+        return _ollama_resp({"findings": []})
+
+    with patch("security_scan.runners.gemma.requests.post", side_effect=_capture):
+        gemma_runner.run(tmp_path)
+
+    user_msg = next(m["content"] for m in captured["body"]["messages"] if m["role"] == "user")
+    assert "AKIAIOSFODNN7EXAMPLE" not in user_msg
+    assert "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" not in user_msg
+    assert "f4Z7q2pHk8wT3sNcRy9LbVxJgQmDeAo5" not in user_msg
+    assert "<REDACTED:" in user_msg
+
+
+def test_runner_refuses_non_local_base_url(tmp_path):
+    """If base_url isn't loopback/private, the runner refuses to send source
+    over the wire at all — no plaintext, no redacted-text, nothing."""
+    (tmp_path / "x.py").write_text("eval(x)")
+    with patch("security_scan.runners.gemma.requests.post") as p:
+        result = gemma_runner.run(tmp_path, base_url="https://api.openai.com")
+    assert result.completed is False
+    assert "non-local" in result.error.lower() or "loopback" in result.error.lower()
+    p.assert_not_called()
+
+
 def test_runner_findings_not_a_list_is_failure(tmp_path):
     _drop_source(tmp_path)
     r = MagicMock()

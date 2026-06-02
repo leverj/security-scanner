@@ -23,6 +23,7 @@ import requests
 from security_scan.config import TriageConfig
 from security_scan.fingerprint import parse_marker
 from security_scan.models import Finding
+from security_scan.redact import is_local_url, redact_obj, redact_text
 from security_scan.sync import SyncResult, default_issue
 
 
@@ -39,6 +40,14 @@ class Triage:
         self._reachable: bool | None = None  # lazy probe
         self._warmed: bool = False  # set once a successful chat has loaded the model
         self._prewarm_thread: threading.Thread | None = None
+        if self.enabled and not is_local_url(self.cfg.base_url):
+            print(
+                f"triage: base_url {self.cfg.base_url!r} is not loopback/private — "
+                "triage is disabled to prevent source snippets leaving the host. "
+                "Set triage.base_url to a local Ollama (e.g. host.docker.internal:11434).",
+                file=sys.stderr,
+            )
+            self.enabled = False
 
     def start_warmup(self) -> None:
         """Explicitly kick off a background model-warming thread. Called by
@@ -296,7 +305,16 @@ class Triage:
 
 
 def _finding_brief(f: Finding) -> str:
-    """Sanitized snapshot of a Finding for the model. NEVER includes raw secret values."""
+    """Sanitized snapshot of a Finding for the model. NEVER includes raw secret values.
+
+    Defence in depth: the deterministic path already masks known-secret findings'
+    snippet/value fields, but other categories (SAST, IaC) hand the model a raw
+    snippet. We run that snippet (and any string in `extra`, and the message)
+    through `redact_text` so hardcoded credentials in source can't slip through.
+    """
+    # Redact BEFORE truncating — a credential straddling the cutoff loses its
+    # recognizable prefix and slips through if we truncate first.
+    snippet_red = redact_text(f.extra["snippet"])[:200] if "snippet" in f.extra else None
     safe = {
         "scanner": f.scanner,
         "category": f.category,
@@ -304,11 +322,13 @@ def _finding_brief(f: Finding) -> str:
         "severity": f.severity,
         "file_path": f.file_path,
         "line": f.line,
-        "title": f.title,
-        "message": f.message[:600] if f.message else "",
+        "title": redact_text(f.title) if f.title else "",
+        "message": redact_text(f.message)[:600] if f.message else "",
         "masked_preview": f.masked_preview,  # already masked; raw value never reaches here
-        "extra": {k: v for k, v in f.extra.items() if k != "snippet"} | (
-            {"snippet": f.extra["snippet"][:200]} if "snippet" in f.extra else {}
+        "extra": redact_obj(
+            {k: v for k, v in f.extra.items() if k != "snippet"} | (
+                {"snippet": snippet_red} if snippet_red is not None else {}
+            )
         ),
     }
     return json.dumps(safe, indent=2, default=str, ensure_ascii=False)

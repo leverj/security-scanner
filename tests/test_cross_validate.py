@@ -163,6 +163,64 @@ def test_codex_missing_skips_codex_review_of_gemma_findings(tmp_path):
     assert "cross_validation" not in (f.extra or {})
 
 
+def test_cross_validate_redacts_secrets_before_send(tmp_path):
+    """Snippets and messages handed to either validator are redacted —
+    hardcoded AWS keys / github tokens in source must not appear in the
+    payload that goes out over HTTP."""
+    f = _f("codex", "auth.foo", severity="high")
+    f.message = "exposed token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa in source"
+    f.extra = {"snippet": "secret = 'AKIAIOSFODNN7EXAMPLE'"}
+    captured = {}
+
+    def _capture(*args, **kwargs):
+        captured["body"] = kwargs["json"]
+        return _ollama_ok({"verdict": "real", "reason": "ok"})
+
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post", side_effect=_capture):
+        cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
+
+    user_msg = captured["body"]["messages"][0]["content"]
+    assert "AKIAIOSFODNN7EXAMPLE" not in user_msg
+    assert "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" not in user_msg
+    assert "<REDACTED:" in user_msg
+
+
+def test_read_snippet_refuses_path_outside_repo(tmp_path):
+    """A malicious or buggy scanner emitting an absolute or `..`-escaped path
+    must not let the validator read arbitrary host files."""
+    from security_scan.cross_validate import _read_snippet
+    # Drop a file outside the "repo".
+    (tmp_path / "outside.txt").write_text("SECRET=keep-out\n")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "inside.txt").write_text("inside content\n")
+
+    # Inside path works.
+    assert "inside content" in _read_snippet(repo, "inside.txt", 1)
+    # Absolute path outside the repo is rejected.
+    assert _read_snippet(repo, str(tmp_path / "outside.txt"), 1) == ""
+    # `..`-escape is rejected.
+    assert _read_snippet(repo, "../outside.txt", 1) == ""
+
+
+def test_cross_validate_skips_gemma_when_url_remote(tmp_path):
+    """Non-local ollama_url must short-circuit the gemma direction entirely —
+    no /api/tags ping, no /api/chat."""
+    f = _f("codex", "x", severity="high")
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get") as g, \
+         patch("security_scan.cross_validate.requests.post") as p:
+        cross_validate(
+            [f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True,
+            ollama_url="https://api.openai.com",
+        )
+    g.assert_not_called()
+    p.assert_not_called()
+    assert "cross_validation" not in (f.extra or {})
+
+
 def test_validator_failure_yields_uncertain(tmp_path):
     """Network/subprocess failures during validation produce an 'uncertain'
     verdict — never block the finding or crash the run."""

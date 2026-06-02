@@ -130,6 +130,28 @@ def test_finding_brief_never_includes_raw_secret():
     assert "secret_fingerprint" in blob
 
 
+def test_finding_brief_redacts_known_tokens_in_snippet_and_message():
+    """Hardcoded credentials in source (visible in extra.snippet) must be
+    redacted before the Finding heads to the model. Same for message."""
+    f = Finding(
+        scanner="semgrep", category="sast", rule_id="hardcoded-token",
+        severity="high", file_path="src/a.py", line=1, title="t",
+        message="found AKIAIOSFODNN7EXAMPLE in config",
+        extra={"snippet": "GITHUB_TOKEN = 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"},
+    )
+    blob = _finding_brief(f)
+    assert "AKIAIOSFODNN7EXAMPLE" not in blob
+    assert "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" not in blob
+    assert "<REDACTED:" in blob
+
+
+def test_triage_disables_itself_when_base_url_remote():
+    """If someone points triage.base_url at a public host, Triage refuses to
+    operate at all — defence-in-depth for the snippet leak vector."""
+    t = Triage(TriageConfig(enabled=True, base_url="https://api.openai.com"))
+    assert t.enabled is False
+
+
 def test_no_candidates_means_no_chat():
     """When all existing issues lack security_scan markers, fuzzy-dup short-circuits."""
     t = Triage(TriageConfig(enabled=True, prewarm=False))
