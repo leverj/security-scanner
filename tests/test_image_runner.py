@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 from security_scan.runners import image as image_runner
 from security_scan.runners.image import ImageScanConfig
 
@@ -64,6 +66,74 @@ def test_discover_base_images_skips_well_known_noise_dirs(tmp_path):
     (tmp_path / "node_modules" / "Dockerfile").write_text("FROM should-not-see:1.0\n")
     (tmp_path / "Dockerfile").write_text("FROM real:1.0\n")
     assert image_runner._discover_base_images(tmp_path) == ["real:1.0"]
+
+
+def test_discover_base_images_accepts_bare_well_known_bases(tmp_path):
+    """`FROM alpine` / `FROM nginx` / `FROM redis` are valid base refs even
+    without a tag, registry, or digest. Previously they were silently dropped
+    because the heuristic required at least one of `:/@`."""
+    (tmp_path / "Dockerfile").write_text(
+        "FROM alpine\n"
+        "FROM nginx\n"
+        "FROM redis\n"
+        "FROM definitely-a-stage-name\n"  # bare name not on the well-known list
+    )
+    refs = image_runner._discover_base_images(tmp_path)
+    assert refs == ["alpine", "nginx", "redis"]
+
+
+def test_discover_base_images_honors_exclude_patterns(tmp_path):
+    """`paths.exclude` must suppress Dockerfile discovery the same way it
+    suppresses scanner inputs — a vendored copy shouldn't trigger an image
+    pull."""
+    (tmp_path / "vendor" / "third-party").mkdir(parents=True)
+    (tmp_path / "vendor" / "third-party" / "Dockerfile").write_text("FROM evil:1.0\n")
+    (tmp_path / "Dockerfile").write_text("FROM good:1.0\n")
+    refs = image_runner._discover_base_images(tmp_path, exclude=["vendor/"])
+    assert refs == ["good:1.0"]
+
+
+def test_discover_base_images_exclude_fnmatch(tmp_path):
+    (tmp_path / "archive").mkdir()
+    (tmp_path / "archive" / "old.Dockerfile").write_text("FROM old:1.0\n")
+    (tmp_path / "Dockerfile").write_text("FROM new:1.0\n")
+    refs = image_runner._discover_base_images(tmp_path, exclude=["archive"])
+    assert refs == ["new:1.0"]
+
+
+def test_ref_and_build_locally_simultaneously_raises(tmp_path):
+    """Documented as mutually exclusive — surface the conflict at construction
+    time so the user notices, rather than silently preferring ref."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        ImageScanConfig(
+            built_image_enabled=True,
+            built_image_ref="leverj/security-scan:latest",
+            build_locally=True,
+        )
+
+
+def test_image_fingerprint_includes_image_ref():
+    """Same CVE in two different base images must fingerprint distinctly so
+    both file as issues, instead of one suppressing the other via dedup."""
+    from security_scan.fingerprint import compute_fingerprint
+    from security_scan.models import Finding
+
+    def _img_finding(image_ref: str) -> Finding:
+        return Finding(
+            scanner="image",
+            category="image",
+            rule_id="CVE-2025-0001",
+            severity="high",
+            file_path="openssl",
+            line=1,
+            title="vuln in openssl",
+            message="...",
+            extra={"image_ref": image_ref, "image_source": "base"},
+        )
+
+    fp_a = compute_fingerprint(_img_finding("python:3.14-slim"))
+    fp_b = compute_fingerprint(_img_finding("alpine:3.20"))
+    assert fp_a != fp_b
 
 
 def test_is_dockerfile_name_variants():

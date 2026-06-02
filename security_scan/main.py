@@ -138,8 +138,18 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
 
         _print_summary(result, completed_scanners, failed, dry_run)
         # Exit 0 even when findings exist — the tool's job is to file, not to gate.
-        # Non-zero only on infrastructure failure (already returned above) or all scanners failing.
-        if not completed_scanners and (cfg.scanners.osv or cfg.scanners.gitleaks or cfg.scanners.semgrep):
+        # Non-zero only on infrastructure failure (already returned above) or
+        # all enabled lanes failing. Include image_scan + supabase_live so an
+        # image-only or supabase-only config that fails every scan exits 3,
+        # not 0.
+        any_lane_enabled = (
+            cfg.scanners.osv or cfg.scanners.gitleaks or cfg.scanners.semgrep
+            or cfg.scanners.trivy or cfg.scanners.trufflehog or cfg.scanners.syft
+            or cfg.scanners.codex or cfg.scanners.gemma
+            or cfg.image_scan.base_images or cfg.image_scan.built_image.enabled
+            or cfg.supabase.enabled
+        )
+        if not completed_scanners and any_lane_enabled:
             print("error: no scanner completed successfully", file=sys.stderr)
             return 3
         return 0
@@ -267,6 +277,7 @@ def _scan_images(
         timeout=cfg_img.timeout,
         trivy_binary=cfg_img.trivy_binary,
         docker_binary=cfg_img.docker_binary,
+        exclude=list(cfg.paths.exclude or []),
     )
 
     results = _image_run(repo_dir, img_cfg)

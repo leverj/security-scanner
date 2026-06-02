@@ -31,6 +31,9 @@ def _snippet_or_secretfp(f: Finding) -> str:
     - dependency: empty (rule_id = GHSA/CVE is already unique per package-advisory)
     - secret: scanner's own secret fingerprint (NEVER the raw secret)
     - sast: whitespace-normalized snippet or enclosing symbol name
+    - image: image_ref so the same CVE in two different base images files
+             as two distinct issues (one per image) instead of deduping into
+             one and silently suppressing the other.
     """
     if f.category == "dependency":
         return ""
@@ -40,6 +43,11 @@ def _snippet_or_secretfp(f: Finding) -> str:
             return f"secret:{secret_fp}"
         # Fall back to masked preview; raw secret must never reach here.
         return f"secret:{_normalize_snippet(f.masked_preview)}"
+    if f.category == "image":
+        # The same CVE-ID can exist in multiple base images; without image_ref
+        # they'd all collapse into a single fingerprint and the project board
+        # would only show the first one.
+        return f"img:{f.extra.get('image_ref', '')}"
     # sast
     snippet = f.extra.get("snippet") or f.extra.get("symbol") or f.message
     return f"snip:{_normalize_snippet(snippet)}"
