@@ -137,7 +137,7 @@ COPY README.md /app/README.md
 # Pull it out without starting the scanner:
 #   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECURITY-SCAN-MANIFEST.yaml
 COPY SECURITY-SCAN-MANIFEST.yaml /app/SECURITY-SCAN-MANIFEST.yaml
-RUN pip install --no-cache-dir /app
+RUN pip install --no-cache-dir "/app[live]"
 
 # Make sure the mount points exist (no VOLUME directive — keeps `--rm` from
 # leaving anonymous volumes behind on each run).

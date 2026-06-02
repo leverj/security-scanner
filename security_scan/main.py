@@ -72,6 +72,7 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
 
         findings, completed_scanners, failed, sbom_artifacts = _scan_and_normalize(detection, cfg, repo_dir)
         _scan_images(cfg, repo_dir, findings, completed_scanners, failed)
+        _scan_supabase_live(cfg, findings, completed_scanners, failed)
         _log_scanner_summary(completed_scanners, failed)
         for sbom in sbom_artifacts:
             print(
@@ -297,6 +298,61 @@ def _image_label(r: RunnerResult) -> str:
             if ref:
                 return str(ref)
     return "unknown"
+
+
+def _scan_supabase_live(
+    cfg: Config, findings: list[Finding],
+    completed: list[str], failed: list[tuple[str, str]],
+) -> None:
+    """Live Supabase Security Advisor lane (epic #4).
+
+    Resolves credentials from env (via the names referenced in cfg.supabase.*_env),
+    opens a read-only psycopg connection, and runs the vendored lint checks.
+    Failure-mode parity with other runners: a connection error contributes zero
+    findings and shows up in the `failed` list, never as "all clear"."""
+    if not cfg.supabase.enabled:
+        return
+
+    # Resolve env vars now — config.py validated the names are set; we fail
+    # at runtime if the env vars themselves are empty.
+    import os
+
+    from security_scan.runners.supabase_live import SupabaseConnConfig
+    from security_scan.runners.supabase_live import run as _supabase_run
+
+    def _env(name: str | None) -> str | None:
+        if not name:
+            return None
+        v = os.environ.get(name, "")
+        return v or None
+
+    dsn = _env(cfg.supabase.url_env)
+    conn = SupabaseConnConfig(
+        dsn=dsn,
+        host=_env(cfg.supabase.host_env),
+        port=cfg.supabase.port,
+        dbname=_env(cfg.supabase.db_env),
+        user=_env(cfg.supabase.user_env),
+        password=_env(cfg.supabase.password_env),
+        sslmode=cfg.supabase.sslmode,
+        connect_timeout=cfg.supabase.connect_timeout,
+        query_timeout_ms=cfg.supabase.query_timeout_ms,
+        checks=cfg.supabase.checks,
+    )
+    if not dsn and not all([conn.host, conn.dbname, conn.user, conn.password]):
+        failed.append(("supabase_live",
+                       "credentials env var(s) unset — check your secrets pipeline"))
+        return
+
+    result = _supabase_run(conn)
+    if not result.completed or result.sarif is None:
+        failed.append(("supabase_live", result.error or "unknown error"))
+        return
+    payload = result.sarif.get("_supabase_findings") if isinstance(result.sarif, dict) else None
+    if isinstance(payload, list):
+        findings.extend(payload)
+    if "supabase_live" not in completed:
+        completed.append("supabase_live")
 
 
 def _absorb(
