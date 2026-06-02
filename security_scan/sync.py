@@ -129,12 +129,13 @@ def sync(
 
 
 def _labels_for(f: Finding) -> list[str]:
-    """The label set applied to a sub-issue.
+    """The label set applied to each issue filed.
 
-    `security` is the existing umbrella label. `security_scan:<category>` lets you
-    filter the parent's sub-issue list by category in the GitHub UI.
-    `security_scan:<severity>` lets you triage by severity. All labels are namespaced
-    under `security_scan:` so they're easy to clean up if you ever drop the tool.
+    `security` is the existing umbrella label. `security-scan:<category>` lets you
+    filter project-board items by category alongside the Category single-select
+    field. `security-scan:<severity>` parallels Severity. All scanner-applied
+    labels are namespaced under `security-scan:` so they're easy to clean up if
+    you ever drop the tool.
     """
     return [
         "security",

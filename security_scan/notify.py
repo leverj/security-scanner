@@ -112,9 +112,9 @@ def _default_digest(
 ) -> str:
     """Slack mrkdwn digest of ACTIONABLE findings (newly filed this run).
 
-    Per-category sections list only the findings that became open sub-issues
-    this run — items that were dup-skipped (already filed previously) or
-    below the severity floor aren't shown. The footer still reports the
+    Per-category sections list only the findings that became open project
+    items this run — items that were dup-skipped (already filed previously)
+    or below the severity floor aren't shown. The footer still reports the
     skip counts so you can see the gates were applied, but the sections
     themselves only contain new bugs to triage.
 

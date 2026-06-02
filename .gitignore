@@ -21,5 +21,8 @@ config/.env.1password.tpl
 .idea/
 .vscode/
 
+# Claude Code session state (per-checkout; not part of the repo)
+.claude/
+
 # OS
 .DS_Store

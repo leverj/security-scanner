@@ -26,9 +26,9 @@
 # Default config directory: ./config/. Override with one of:
 #   --config /path/to/cfg.yaml     # explicit file path (its parent dir is mounted)
 #   SECURITY_SCAN_CONFIG=...             # same thing via env var
-#   SECSCAN_CONFIG_DIR=...         # mount this dir instead; expects config.yaml inside
+#   SECURITY_SCAN_CONFIG_DIR=...         # mount this dir instead; expects config.yaml inside
 #
-# When the skill packages security-scan, point SECSCAN_CONFIG_DIR at the per-project
+# When the skill packages security-scan, point SECURITY_SCAN_CONFIG_DIR at the per-project
 # config the agent maintains for the user.
 
 set -euo pipefail
@@ -123,7 +123,7 @@ cmd_build() {
 }
 
 cmd_check() {
-  local config_dir="${SECSCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
+  local config_dir="${SECURITY_SCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
   local config="${SECURITY_SCAN_CONFIG:-$config_dir/config.yaml}"
   local ok=1
 
@@ -212,7 +212,7 @@ cmd_check() {
 cmd_run() {
   command -v docker >/dev/null || die "docker not on PATH"
 
-  local config_dir="${SECSCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
+  local config_dir="${SECURITY_SCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
   local config="${SECURITY_SCAN_CONFIG:-$config_dir/config.yaml}"
   local extra_args=()
   local have_dry_run=0
@@ -258,7 +258,7 @@ To set up:
   \$EDITOR config/config.yaml          # set repo, ref, project, secrets.source
 
 See README.md ("Setup: secrets") for env-vs-1Password choice.
-Or set SECSCAN_CONFIG_DIR=/path/to/your-config-dir to use a different directory.
+Or set SECURITY_SCAN_CONFIG_DIR=/path/to/your-config-dir to use a different directory.
 EOF
     exit 1
   fi
@@ -392,7 +392,7 @@ usage:
 
 defaults:
   --dry-run is added unless you pass --no-dry-run
-  --config-dir defaults to ./config/ (override with SECSCAN_CONFIG_DIR env)
+  --config-dir defaults to ./config/ (override with SECURITY_SCAN_CONFIG_DIR env)
   --config defaults to <config-dir>/config.yaml (override with SECURITY_SCAN_CONFIG env)
   image tag defaults to "security-scan:latest" (override with SECURITY_SCAN_IMAGE env)
 
