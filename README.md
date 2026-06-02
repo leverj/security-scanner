@@ -22,8 +22,8 @@ Closing/fixing findings is out of scope — another system owns that.
 #      - Category   (dependency, secret, sast, iac, license)
 
 # 2. Copy the example config
-cp config.example.yaml config.yaml
-$EDITOR config.yaml          # set repo, ref, project.owner, project.number
+cp config/config.example.yaml config/config.yaml
+$EDITOR config/config.yaml   # set repo, ref, project.owner, project.number
 
 # 3. Set up secrets — pick ONE of the two paths in the next section
 
@@ -86,8 +86,8 @@ brew install 1password-cli
 op signin
 
 # Copy the template and edit the vault/item paths to point at your own entries
-cp .env.1password.tpl.example .env.1password.tpl
-$EDITOR .env.1password.tpl
+cp config/.env.1password.tpl.example config/.env.1password.tpl
+$EDITOR config/.env.1password.tpl
 ```
 
 `.env.1password.tpl` then looks like:
@@ -157,10 +157,10 @@ Common failure modes and what `check` says:
 
 | Symptom | Fix |
 |---|---|
-| `config not found` | `cp config.example.yaml config.yaml` |
+| `config not found` | `cp config/config.example.yaml config/config.yaml` |
 | `GITHUB_TOKEN unset` (env source) | `export GITHUB_TOKEN=…` or switch to `secrets.source: "1password"` |
 | `op not installed` (1Password source) | `brew install 1password-cli && op signin` |
-| `.env.1password.tpl missing` | `cp .env.1password.tpl.example .env.1password.tpl && $EDITOR …` |
+| `.env.1password.tpl missing` | `cp config/.env.1password.tpl.example config/.env.1password.tpl && $EDITOR …` |
 | `SLACK_… unset` (slack.enabled=true) | Either export the var, add it to the 1Password env file, or set `slack.enabled: false` |
 | `image not built yet` | `./secscan.sh build` |
 | `docker daemon not reachable` | Start Docker Desktop |
@@ -179,6 +179,34 @@ image — local tests use SARIF fixtures and mocked subprocesses. To exercise th
 real binaries, run via `./secscan.sh run`.
 
 ---
+
+## Claude Code skill
+
+This repo ships a [Claude Code](https://claude.com/claude-code) skill at
+[`skill/`](skill/). It lets the agent drive secscan for you ("scan this repo
+for security issues", "/secscan", etc.).
+
+Install once:
+
+```bash
+git clone https://github.com/leverj/security-scanner.git ~/code/security-scanner
+echo 'export SECSCAN_HOME=~/code/security-scanner' >> ~/.zshrc   # or .bashrc
+source ~/.zshrc
+
+~/code/security-scanner/skill/install.sh   # copies skill to ~/.claude/skills/secscan/
+```
+
+The skill bundle contains:
+
+- `skill/SKILL.md` — what the agent sees: when to invoke, operating procedure, hard rules.
+- `skill/references/README.md` — high-level reference.
+- `skill/references/CONFIG.md` — full config schema + 1Password walkthrough.
+- `skill/references/RUN.md` — runbook, flags, exit codes, failure recovery.
+
+The scanner repo stays the single source of truth — the skill is just
+instructions pointing at `$SECSCAN_HOME`. Update secscan by `git pull`-ing
+in `$SECSCAN_HOME`; no need to re-run `install.sh` unless the skill
+content itself changes.
 
 ## Spec
 

@@ -11,11 +11,11 @@ htmlcov/
 work/
 /tmp_*
 
-# Per-deployment config (use config.example.yaml as the template; keep secrets out of git)
-config.yaml
+# Per-deployment config (use config/config.example.yaml as the template; keep secrets out of git)
+config/config.yaml
 
 # Personal 1Password reference template (paths to your vault items)
-.env.1password.tpl
+config/.env.1password.tpl
 
 # IDE
 .idea/

@@ -18,13 +18,24 @@
 # Required env (only when slack.enabled=true AND secrets.source=env):
 #   the var named by slack.webhook_url_env  (or BOTH channel_id_env and bot_token_env)
 #
-# Config: defaults to ./config.yaml; override with `--config /path/to/cfg.yaml` before
-# any other args, or set SECSCAN_CONFIG=... in env.
+# Config layout (bind-mounted as a single directory into the container):
+#
+#   config/config.yaml              # required — main settings
+#   config/.env.1password.tpl       # optional — only when secrets.source=1password
+#
+# Default config directory: ./config/. Override with one of:
+#   --config /path/to/cfg.yaml     # explicit file path (its parent dir is mounted)
+#   SECSCAN_CONFIG=...             # same thing via env var
+#   SECSCAN_CONFIG_DIR=...         # mount this dir instead; expects config.yaml inside
+#
+# When the skill packages secscan, point SECSCAN_CONFIG_DIR at the per-project
+# config the agent maintains for the user.
 
 set -euo pipefail
 
 IMAGE="${SECSCAN_IMAGE:-secscan:latest}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_CONFIG_DIR="$HERE/config"
 
 die() { echo "error: $*" >&2; exit 1; }
 warn() { echo "warning: $*" >&2; }
@@ -112,14 +123,15 @@ cmd_build() {
 }
 
 cmd_check() {
-  local config="${SECSCAN_CONFIG:-$HERE/config.yaml}"
+  local config_dir="${SECSCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
+  local config="${SECSCAN_CONFIG:-$config_dir/config.yaml}"
   local ok=1
 
   echo "== config =="
   if [[ -f "$config" ]]; then
     echo "  ✓ $config"
   else
-    echo "  ✗ $config (cp config.example.yaml config.yaml)"
+    echo "  ✗ $config (cp config/config.example.yaml config/config.yaml)"
     ok=0
   fi
 
@@ -166,10 +178,12 @@ cmd_check() {
         ;;
       1password|1Password|op)
         local ef; ef="$(read_config_field "$config" "secrets.env_file" ".env.1password.tpl")"
-        [[ "$ef" = /* ]] || ef="$HERE/$ef"
+        # Resolve env_file relative to the config directory (so the whole config/
+        # dir is the unit of bind-mount).
+        [[ "$ef" = /* ]] || ef="$config_dir/$ef"
         if command -v op >/dev/null; then echo "  ✓ op (1Password CLI) installed"; else echo "  ✗ op not installed (brew install 1password-cli)"; ok=0; fi
         if op account list >/dev/null 2>&1; then echo "  ✓ op signed in"; else echo "  ⚠ op not signed in (run: op signin)"; fi
-        if [[ -f "$ef" ]]; then echo "  ✓ $ef present"; else echo "  ✗ $ef missing (cp .env.1password.tpl.example .env.1password.tpl)"; ok=0; fi
+        if [[ -f "$ef" ]]; then echo "  ✓ $ef present"; else echo "  ✗ $ef missing (cp config/.env.1password.tpl.example config/.env.1password.tpl)"; ok=0; fi
         ;;
       *)
         echo "  ✗ secrets.source must be 'env' or '1password', got: $secrets_source"
@@ -198,19 +212,24 @@ cmd_check() {
 cmd_run() {
   command -v docker >/dev/null || die "docker not on PATH"
 
-  local config="${SECSCAN_CONFIG:-$HERE/config.yaml}"
+  local config_dir="${SECSCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
+  local config="${SECSCAN_CONFIG:-$config_dir/config.yaml}"
   local extra_args=()
   local have_dry_run=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --config) config="$2"; shift 2 ;;
-      --config=*) config="${1#--config=}"; shift ;;
+      --config) config="$2"; config_dir="$(dirname "$2")"; shift 2 ;;
+      --config=*) config="${1#--config=}"; config_dir="$(dirname "$config")"; shift ;;
+      --config-dir) config_dir="$2"; config="$2/config.yaml"; shift 2 ;;
+      --config-dir=*) config_dir="${1#--config-dir=}"; config="$config_dir/config.yaml"; shift ;;
       --dry-run) have_dry_run=1; extra_args+=("$1"); shift ;;
       --) shift; extra_args+=("$@"); break ;;
       *) extra_args+=("$1"); shift ;;
     esac
   done
+  # Canonicalize.
+  config_dir="$(cd "$config_dir" 2>/dev/null && pwd || echo "$config_dir")"
 
   # Default to --dry-run unless the caller asked for the real path. Build a new
   # array so `--no-dry-run` is removed cleanly (rather than replaced with "").
@@ -235,10 +254,11 @@ cmd_run() {
 error: config not found at $config
 
 To set up:
-  cp config.example.yaml config.yaml
-  \$EDITOR config.yaml          # set repo, ref, parent_issue, secrets.source
+  cp config/config.example.yaml config/config.yaml
+  \$EDITOR config/config.yaml          # set repo, ref, project, secrets.source
 
 See README.md ("Setup: secrets") for env-vs-1Password choice.
+Or set SECSCAN_CONFIG_DIR=/path/to/your-config-dir to use a different directory.
 EOF
     exit 1
   fi
@@ -303,9 +323,9 @@ Run \`./secscan.sh check\` to see your full setup status.
 EOF
         exit 1
       fi
-      echo "secrets: env (shell exports)  slack: $SLACK_MODE" >&2
+      echo "secrets: env (shell exports)  slack: $SLACK_MODE  config-dir: $config_dir" >&2
       exec docker run --rm \
-        -v "$config":/config/config.yaml:ro \
+        -v "$config_dir":/config:ro \
         "${env_args[@]}" \
         "$IMAGE" "${extra_args[@]+"${extra_args[@]}"}"
       ;;
@@ -323,14 +343,14 @@ EOF
         exit 1
       fi
       local ef="$env_file"
-      [[ "$ef" = /* ]] || ef="$HERE/$ef"
+      [[ "$ef" = /* ]] || ef="$config_dir/$ef"
       if [[ ! -f "$ef" ]]; then
         cat >&2 <<EOF
 error: secrets env file not found: $ef
 
 Create it from the committed template:
-  cp .env.1password.tpl.example .env.1password.tpl
-  \$EDITOR .env.1password.tpl               # set op://<vault>/<item>/<field> paths
+  cp config/.env.1password.tpl.example config/.env.1password.tpl
+  \$EDITOR config/.env.1password.tpl        # set op://<vault>/<item>/<field> paths
 
 The template lists every env var secscan understands.
 EOF
@@ -342,9 +362,9 @@ EOF
           grep -qE "^\s*${v}\s*=" "$ef" || warn "$v not referenced in $ef but slack.enabled=true; add 'op://...' line or set slack.enabled: false"
         done
       fi
-      echo "secrets: 1password ($ef)  slack: $SLACK_MODE" >&2
+      echo "secrets: 1password ($ef)  slack: $SLACK_MODE  config-dir: $config_dir" >&2
       exec op run --env-file="$ef" -- docker run --rm \
-        -v "$config":/config/config.yaml:ro \
+        -v "$config_dir":/config:ro \
         "${env_args[@]}" \
         "$IMAGE" "${extra_args[@]+"${extra_args[@]}"}"
       ;;
@@ -364,13 +384,20 @@ secscan.sh — build/run the secscan container
 
 usage:
   ./secscan.sh build
-  ./secscan.sh run [--config path/to/config.yaml] [--dry-run|--no-dry-run] [extra secscan args...]
+  ./secscan.sh run [--config path/to/config.yaml]
+                   [--config-dir path/to/config_dir]
+                   [--dry-run|--no-dry-run]
+                   [extra secscan args...]
   ./secscan.sh check
 
 defaults:
   --dry-run is added unless you pass --no-dry-run
-  --config defaults to ./config.yaml (override with SECSCAN_CONFIG env)
+  --config-dir defaults to ./config/ (override with SECSCAN_CONFIG_DIR env)
+  --config defaults to <config-dir>/config.yaml (override with SECSCAN_CONFIG env)
   image tag defaults to "secscan:latest" (override with SECSCAN_IMAGE env)
+
+The whole --config-dir is bind-mounted read-only at /config inside the container,
+so any related files (the 1Password env template, etc.) ride along.
 
 secrets (driven by config.yaml):
   secrets.source: env        -> use already-exported shell variables
