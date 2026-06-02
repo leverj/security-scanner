@@ -164,7 +164,7 @@ def _gemma_verdict(
     snippet = _read_snippet(repo_dir, f.file_path, f.line) or (f.extra or {}).get("snippet", "")
     prompt = _REVIEW_PROMPT.format(
         finding_json=json.dumps(_finding_summary(f), indent=2),
-        snippet=redact_text(str(snippet)[:1200]) or "(unavailable)",
+        snippet=redact_text(str(snippet))[:1200] or "(unavailable)",
     )
     try:
         r = requests.post(
@@ -199,7 +199,7 @@ def _codex_verdict(
     # Codex is a cloud LLM (ChatGPT subscription) — always redact before send.
     prompt = _REVIEW_PROMPT.format(
         finding_json=json.dumps(_finding_summary(f), indent=2),
-        snippet=redact_text(str(snippet)[:1200]) or "(unavailable)",
+        snippet=redact_text(str(snippet))[:1200] or "(unavailable)",
     )
     with tempfile.TemporaryDirectory(prefix="codex-validate-") as td:
         schema = Path(td) / "schema.json"
@@ -269,11 +269,17 @@ def _finding_summary(f: Finding) -> dict:
 def _read_snippet(repo_dir: Path, file_path: str, line: int | None, ctx: int = 6) -> str:
     """Pull a small context window around `line` from the cloned repo. Returns
     empty string on any read failure (the validator can still decide from the
-    finding's message)."""
+    finding's message).
+
+    Defensive against a scanner emitting absolute or `..`-relative paths that
+    could read outside `repo_dir` (e.g. `/etc/passwd`, `../../secrets`)."""
     if not file_path:
         return ""
-    p = repo_dir / file_path
+    p = (repo_dir / file_path).resolve()
     try:
+        repo_resolved = repo_dir.resolve()
+        if not p.is_relative_to(repo_resolved):
+            return ""  # path escape attempt — refuse to read
         if not p.is_file():
             return ""
         lines = p.read_text(errors="ignore").splitlines()

@@ -32,26 +32,51 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # GitHub tokens (classic, fine-grained, OAuth, refresh)
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{36,255}\b"), "<REDACTED:github-token>"),
     (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{60,}\b"), "<REDACTED:github-pat>"),
-    # Stripe
+    # GitLab personal/project/group tokens
+    (re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"), "<REDACTED:gitlab-token>"),
+    # Stripe live/test keys + webhook signing secret
     (re.compile(r"\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b"), "<REDACTED:stripe-key>"),
+    (re.compile(r"\bwhsec_[A-Za-z0-9]{24,}\b"), "<REDACTED:stripe-webhook>"),
     # OpenAI / Anthropic-like
     (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"), "<REDACTED:llm-api-key>"),
     # Slack
-    (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b"), "<REDACTED:slack-token>"),
+    (re.compile(r"\bxox[abeprs]-[A-Za-z0-9-]{10,}\b"), "<REDACTED:slack-token>"),
+    (re.compile(r"\bxapp-[0-9]-[A-Za-z0-9-]{20,}\b"), "<REDACTED:slack-app-token>"),
     # Google API
     (re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "<REDACTED:google-api-key>"),
+    (re.compile(r"\bya29\.[0-9A-Za-z_-]{20,}\b"), "<REDACTED:google-oauth>"),
+    # SendGrid
+    (re.compile(r"\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b"), "<REDACTED:sendgrid-key>"),
+    # Age private key
+    (re.compile(r"\bAGE-SECRET-KEY-1[0-9A-Z]{50,}\b"), "<REDACTED:age-key>"),
     # JWTs (three base64url segments)
     (re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b"),
      "<REDACTED:jwt>"),
     # PEM blocks (multi-line) — DOTALL so `.` crosses newlines
     (re.compile(r"-----BEGIN [A-Z0-9 ]+?-----.*?-----END [A-Z0-9 ]+?-----", re.DOTALL),
      "<REDACTED:pem-key>"),
-    # Common assignment shapes: NAME=value where NAME hints at a secret.
-    # We replace ONLY the value portion so the label stays readable.
+    # Database / message-broker connection strings with embedded credentials.
+    # postgres://user:pass@host, mongodb+srv://, redis://, amqp://, mysql://, etc.
     (re.compile(
-        r"(?i)\b(?P<k>(?:api[_-]?key|secret|token|password|passwd|auth|bearer|"
-        r"client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key))"
-        r"\s*[:=]\s*['\"]?(?P<v>[A-Za-z0-9+/=_\-\.]{16,})['\"]?"
+        r"\b(?P<scheme>postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|amqps|smtp"
+        r"|ftp|ftps|sftp|jdbc:[a-z]+|kafka)://"
+        r"[^:/@\s]*:(?P<pass>[^@\s]{1,})@[^\s\"'`]+"
+    ), lambda m: f"{m.group('scheme')}://<REDACTED:db-url-cred>"),
+    # Azure storage connection strings — AccountKey= / SharedAccessKey= / SAS sig=.
+    (re.compile(r"(?i)(AccountKey|SharedAccessKey|SharedSecret)\s*=\s*[A-Za-z0-9+/=]{20,}"),
+     lambda m: f"{m.group(1)}=<REDACTED:azure-key>"),
+    (re.compile(r"(?i)\bsig=[A-Za-z0-9%+/=]{20,}"), "sig=<REDACTED:sas-sig>"),
+    # Long hex digests (32+ char) — common for HMAC keys, session secrets, etc.
+    # Entropy heuristic misses these because hex has only 16 symbols (entropy ≤ 4).
+    (re.compile(r"\b[a-f0-9]{32,}\b"), "<REDACTED:hex-digest>"),
+    # Common assignment shapes: NAME=value where NAME hints at a secret.
+    # Permissive left boundary: matches `AWS_SECRET_ACCESS_KEY` and `apiKey` alike.
+    (re.compile(
+        r"(?i)(?:^|[^A-Za-z0-9])(?P<k>(?:api[_-]?key|secret(?:[_-]?(?:access[_-]?)?key)?"
+        r"|token|password|passwd|auth(?:[_-]?token)?|bearer|client[_-]?secret"
+        r"|access[_-]?token|refresh[_-]?token|private[_-]?key|jwt[_-]?secret"
+        r"|db[_-]?password|database[_-]?password))"
+        r"['\"]?\s*[:=]\s*['\"]?(?P<v>[^\s'\";,]{8,})['\"]?"
     ), lambda m: f"{m.group('k')}=<REDACTED:secret-like>"),
 )
 

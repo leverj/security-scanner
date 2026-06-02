@@ -312,6 +312,9 @@ def _finding_brief(f: Finding) -> str:
     snippet. We run that snippet (and any string in `extra`, and the message)
     through `redact_text` so hardcoded credentials in source can't slip through.
     """
+    # Redact BEFORE truncating — a credential straddling the cutoff loses its
+    # recognizable prefix and slips through if we truncate first.
+    snippet_red = redact_text(f.extra["snippet"])[:200] if "snippet" in f.extra else None
     safe = {
         "scanner": f.scanner,
         "category": f.category,
@@ -319,12 +322,12 @@ def _finding_brief(f: Finding) -> str:
         "severity": f.severity,
         "file_path": f.file_path,
         "line": f.line,
-        "title": f.title,
-        "message": redact_text(f.message[:600]) if f.message else "",
+        "title": redact_text(f.title) if f.title else "",
+        "message": redact_text(f.message)[:600] if f.message else "",
         "masked_preview": f.masked_preview,  # already masked; raw value never reaches here
         "extra": redact_obj(
             {k: v for k, v in f.extra.items() if k != "snippet"} | (
-                {"snippet": f.extra["snippet"][:200]} if "snippet" in f.extra else {}
+                {"snippet": snippet_red} if snippet_red is not None else {}
             )
         ),
     }

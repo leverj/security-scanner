@@ -155,6 +155,77 @@ def test_remote_urls(url):
 # -- idempotency ---------------------------------------------------------------
 
 
+def test_assignment_regex_matches_prefixed_names():
+    """Codex review caught that AWS_SECRET_ACCESS_KEY and similar prefixed
+    names didn't match the original `\\b`-anchored assignment regex because `_`
+    is a word character. Permissive left-boundary now handles them."""
+    cases = [
+        "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIabcdefghijkl12345678",
+        "DB_PASSWORD = 'supersecret_password_123'",
+        "JWT_SECRET: mySuperSecretValue123",
+        '"apiKey": "secret_value_for_api"',
+    ]
+    for raw in cases:
+        out = redact_text(raw)
+        assert "<REDACTED:secret-like>" in out, f"missed: {raw!r} → {out!r}"
+
+
+def test_database_url_credentials_redacted():
+    cases = [
+        "postgres://app:hunter2@db.internal:5432/myapp",
+        "mongodb+srv://admin:somelongpassword@cluster0.example.com/db",
+        "redis://:hunter2@cache:6379/0",
+        "mysql://root:rootpw@localhost/test",
+    ]
+    for raw in cases:
+        out = redact_text(raw)
+        assert "<REDACTED:db-url-cred>" in out, raw
+        # The password segment must not survive (sample values).
+        for pw in ("hunter2", "somelongpassword", "rootpw"):
+            if pw in raw:
+                assert pw not in out, f"{pw} survived in {out!r}"
+
+
+def test_hex_digest_redacted():
+    """Hex blobs of 32+ chars (HMAC keys, session secrets) — entropy heuristic
+    misses them because hex's per-char entropy ≤ 4."""
+    cases = [
+        "key=" + "a" * 32,  # 32 hex
+        "deadbeefcafebabe0123456789abcdef",  # 32 hex
+        "abc" + "0" * 64,  # 64 hex but with prefix so we hit the boundary correctly
+        "1234567890abcdef1234567890abcdef12345678",  # 40 hex
+    ]
+    for raw in cases:
+        out = redact_text(raw)
+        # Either hex-digest OR secret-like (the `key=` form will catch some too)
+        assert "<REDACTED:" in out, raw
+
+
+def test_gitlab_and_stripe_webhook():
+    # Prefixes split at runtime so the file itself doesn't contain literal
+    # secret-shape prefixes (GitHub push protection flags those).
+    raw = (
+        "tokens: " + "glpat-" + "AbCdEfGhIj0123456789 and "
+        + "whsec_" + "1234567890abcdef1234567890ab"
+    )
+    out = redact_text(raw)
+    assert "<REDACTED:gitlab-token>" in out
+    assert "<REDACTED:stripe-webhook>" in out
+
+
+def test_azure_account_key():
+    raw = "DefaultEndpointsProtocol=https;AccountName=foo;AccountKey=" + "B" * 88 + "==;EndpointSuffix=core.windows.net"
+    out = redact_text(raw)
+    assert "<REDACTED:azure-key>" in out
+    assert "B" * 88 not in out
+
+
+def test_age_secret_key():
+    raw = "key: AGE-SECRET-KEY-1" + "Q" * 58
+    out = redact_text(raw)
+    assert "<REDACTED:age-key>" in out
+
+
 def test_redact_is_idempotent():
     raw = "key=AKIAIOSFODNN7EXAMPLE and token=ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     once = redact_text(raw)

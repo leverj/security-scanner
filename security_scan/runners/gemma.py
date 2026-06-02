@@ -236,18 +236,17 @@ def _excluded(rel: str, patterns: list[str]) -> bool:
 
 
 def _build_user_prompt(files: Iterable[tuple[str, str]], repo_dir: Path) -> str:
+    # Materialize once — `files` might be a generator and we need to count + iterate.
+    file_list = list(files)
     parts = [
         f"Repository root: {repo_dir.name}",
-        f"Files to review: {sum(1 for _ in files)}",
+        f"Files to review: {len(file_list)}",
         "",
         "Each file is delimited by `===== FILE: <path> =====` markers.",
         "Cite line numbers as you see them in the content below "
         "(1-based, counting from the first line shown).",
         "",
     ]
-    # files might be a generator above; re-list to iterate twice
-    file_list = list(files)
-    parts[1] = f"Files to review: {len(file_list)}"
     # Redact known-token shapes + high-entropy substrings from every file body
     # before the prompt leaves the box. Even though Ollama is meant to be local,
     # defence-in-depth: if someone points base_url at a remote host (or proxies

@@ -187,6 +187,24 @@ def test_cross_validate_redacts_secrets_before_send(tmp_path):
     assert "<REDACTED:" in user_msg
 
 
+def test_read_snippet_refuses_path_outside_repo(tmp_path):
+    """A malicious or buggy scanner emitting an absolute or `..`-escaped path
+    must not let the validator read arbitrary host files."""
+    from security_scan.cross_validate import _read_snippet
+    # Drop a file outside the "repo".
+    (tmp_path / "outside.txt").write_text("SECRET=keep-out\n")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "inside.txt").write_text("inside content\n")
+
+    # Inside path works.
+    assert "inside content" in _read_snippet(repo, "inside.txt", 1)
+    # Absolute path outside the repo is rejected.
+    assert _read_snippet(repo, str(tmp_path / "outside.txt"), 1) == ""
+    # `..`-escape is rejected.
+    assert _read_snippet(repo, "../outside.txt", 1) == ""
+
+
 def test_cross_validate_skips_gemma_when_url_remote(tmp_path):
     """Non-local ollama_url must short-circuit the gemma direction entirely —
     no /api/tags ping, no /api/chat."""
