@@ -182,20 +182,23 @@ real binaries, run via `./security-scan.sh run`.
 
 ## Publish a new image
 
-The image is published from your local machine — no CI secrets needed. Make
-sure you're logged in to Docker Hub first:
+The image is published from your local machine — no CI secrets needed.
 
 ```bash
 docker login                 # uses your Docker Hub credentials
-./security-scan.sh publish   # builds multi-arch, prompts, pushes
+./security-scan.sh publish   # builds multi-arch, prompts, pushes :latest
 ```
 
-`publish` reads the version from `SECURITY-SCAN-MANIFEST.yaml`, verifies
-`pyproject.toml` matches, derives the tag (`v<version>`), and pushes
-`leverj/security-scan:v<version>` + `:latest` for amd64 + arm64. Pass an
-explicit tag to override (`./security-scan.sh publish v0.3.0-rc1`), or
-`--no-push` to do a release dry-run that builds locally without pushing.
-Run `./security-scan.sh publish --help` for the full set of flags.
+Only the `leverj/security-scan:latest` tag is published. Each push creates a
+new immutable image digest that the consumer skill watches — versioned tags
+would just accumulate on Docker Hub. The script verifies `pyproject.toml`'s
+version matches `SECURITY-SCAN-MANIFEST.yaml`'s before publishing (the
+version label lives inside the manifest, not as a docker tag) and prints
+the resulting digest after push so you can confirm the skill will see it.
+
+Pass `--no-push` to do a release dry-run that builds locally without
+pushing, or `--single-arch` to skip multi-arch buildx. Full flag list:
+`./security-scan.sh publish --help`.
 
 ## Use as a Claude Code skill
 

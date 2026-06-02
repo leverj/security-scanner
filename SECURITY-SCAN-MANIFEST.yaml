@@ -27,13 +27,14 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.2.2"
+version: "0.2.3"
 config_schema_version: 2
 docker_image: "leverj/security-scan"
 released: "2026-06-02"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
+  - "0.2.3: only `:latest` is published from now on (no more per-version tags accumulating on Docker Hub). The consumer skill detects new releases by watching the image digest, not the tag. The `version` field here is the human-readable identifier shown on the upgrade prompt — image identity remains the digest."
   - "0.2.2: CVE cleanup — bumped scanner pins (osv-scanner 2.3.8, gitleaks 8.30.1, trivy 0.71.0, trufflehog 3.95.5, semgrep 1.164.0) so each embeds a current Go stdlib; base bumped python:3.13-slim → python:3.14-slim; pip/wheel/setuptools upgraded together. Residual high-impact CVE (CVE-2025-68121 in Go 1.24.11) is inside gitleaks 8.30.1 — fix is upstream."
   - "0.2.1: hardened image — base bumped to python:3.12-slim with apt-get upgrade for current security patches; container now runs as non-root user 'scanner' (uid 1000); SBOM + SLSA provenance attestations now attached on publish."
   - "BREAKING (0.2.0): config moved from a single file to a directory (config/config.yaml). Bind-mount config/ at /config:ro."
