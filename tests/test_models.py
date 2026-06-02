@@ -1,4 +1,4 @@
-from secscan.models import Finding, normalize_severity
+from security_scan.models import Finding, normalize_severity
 
 
 def test_normalize_severity_from_security_severity_score():

@@ -1,0 +1,116 @@
+# SECURITY-SCAN-MANIFEST.yaml
+#
+# Declarative contract between this image and any tool (skill, CI job, etc.)
+# that drives it. Baked into the image at /app/SECURITY-SCAN-MANIFEST.yaml.
+#
+# Read it from outside the running container with:
+#   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECURITY-SCAN-MANIFEST.yaml
+#
+# Contract:
+#  - `version` matches pyproject.toml's [project.version] and the docker tag.
+#  - `config_schema_version` bumps only when the YAML schema changes in a way
+#    that needs migration (adding optional fields with defaults does NOT
+#    require a bump; renames and removals do).
+#  - `config.new_fields` lets a smart skill add missing fields to a user's
+#    config.yaml on upgrade WITHOUT clobbering values they've already set.
+#  - `config.renamed_fields` and `config.removed_fields` capture
+#    breaking changes for the skill to surface to the user.
+#
+# Skills should compare a user's local "pinned tag" against the latest
+# manifest, and on upgrade:
+#   1. Show `changelog` to the user.
+#   2. If `breaking_changes` is non-empty, require confirmation per item.
+#   3. Apply `config.renamed_fields` (rename in-place; show diff).
+#   4. Add any `config.new_fields` not already present (with documented defaults).
+#   5. Strip any `config.removed_fields` (show diff, confirm).
+#
+# Adding to this file in a new release is non-breaking. Removing fields is
+# breaking — skills must tolerate older manifests missing keys.
+
+version: "0.2.0"
+config_schema_version: 2
+docker_image: "leverj/security-scan"
+released: "2026-06-02"
+
+# One-liners for the upgrade prompt the skill shows users.
+changelog:
+  - "BREAKING: config moved from a single file to a directory (config/config.yaml). Bind-mount config/ at /config:ro."
+  - "BREAKING: replaced parent_issue (int) with project.{owner,number} — findings file into a GitHub Projects v2 board, not as sub-issues."
+  - "PAT now needs `project` scope in addition to `repo`."
+  - "Added Codex + Gemma LLM SAST scanners (off by default) with bidirectional cross-validation."
+  - "Added bundled Semgrep rules: XSS, SQLi, Supabase migration patterns."
+
+breaking_changes:
+  - id: "config-as-directory"
+    summary: "The host-side mount target is now the config DIRECTORY, not a single config.yaml file."
+    user_action: "Move config.yaml + .env.1password.tpl into a config/ directory and bind-mount that directory at /config:ro."
+  - id: "projects-v2"
+    summary: "parent_issue (int) is removed. Findings now file into a GitHub Projects v2 board."
+    user_action: "Add `project: {owner, number}` block to config.yaml; add `project` scope to your PAT; optionally bulk-add existing sub-issues to the new board for clean dedup on the first run."
+
+config:
+  # Optional fields the skill should ADD to a user's config.yaml when missing.
+  # `default` is the value to insert. `since` is the schema version that
+  # introduced the field — skills can use it to decide whether to apply.
+  new_fields:
+    - path: "project.owner"
+      since: 2
+      required: true
+      default: null
+      note: "Org or user that owns the target Projects v2 board. Required."
+    - path: "project.number"
+      since: 2
+      required: true
+      default: null
+      note: "Project number (the integer in the URL: /projects/<number>). Required."
+    - path: "scanners.codex"
+      since: 2
+      default: false
+      note: "Enable OpenAI Codex LLM SAST (uses your local `codex` CLI subscription; no API key)."
+    - path: "scanners.gemma"
+      since: 2
+      default: false
+      note: "Enable local Gemma LLM SAST via Ollama."
+    - path: "codex"
+      since: 2
+      default:
+        binary: "codex"
+        model: null
+        timeout: 1200
+      note: "Codex CLI tunables. Only used when scanners.codex is true."
+    - path: "gemma"
+      since: 2
+      default:
+        base_url: null
+        model: null
+        keep_alive: null
+        timeout: 1800
+        max_files: 60
+        max_file_bytes: 12000
+        max_total_bytes: 200000
+      note: "Gemma SAST tunables. base_url/model/keep_alive fall back to triage:* when null."
+    - path: "cross_validate"
+      since: 2
+      default:
+        enabled: true
+        codex_timeout: 300
+        gemma_timeout: 180
+      note: "When both scanners.codex AND scanners.gemma are true, each reviews the other's findings. False positives downgrade severity one notch; critical never auto-downgrades; findings are never suppressed."
+
+  # Fields that were renamed. Skill should apply the rename in the user's config.
+  renamed_fields:
+    - from: "parent_issue"
+      to:   "project"
+      since: 2
+      note: "parent_issue (int) -> project (mapping). security-scan no longer files as sub-issues under a parent epic; findings are flat items in a Projects v2 board. The skill should drop parent_issue from the user's config and prompt for project.{owner,number}."
+
+  removed_fields: []
+
+# Files inside the image worth knowing about (for documentation purposes —
+# skills don't typically need to reach in past the entrypoint).
+image_paths:
+  manifest: "/app/SECURITY-SCAN-MANIFEST.yaml"
+  source: "/app/security-scan/"
+  rules:  "/app/security-scan/rules/"
+  config_mount: "/config"
+  work_mount:   "/work"

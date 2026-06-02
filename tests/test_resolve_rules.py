@@ -8,7 +8,7 @@ mounted) was selected ahead of the bundled rules, causing semgrep to exit 7
 from pathlib import Path
 from unittest.mock import patch
 
-from secscan.config import (
+from security_scan.config import (
     Config,
     PathsConfig,
     ProjectConfig,
@@ -16,7 +16,7 @@ from secscan.config import (
     SlackConfig,
     TriageConfig,
 )
-from secscan.main import _has_rule_files, _resolve_semgrep_rules
+from security_scan.main import _has_rule_files, _resolve_semgrep_rules
 
 
 def _cfg(rules=None):
@@ -68,7 +68,7 @@ def test_resolver_skips_empty_rules_mount_falls_through_to_bundled(tmp_path: Pat
     bundled.mkdir()
     (bundled / "r.yaml").write_text("rules: []")
 
-    with patch("secscan.main.Path") as P:
+    with patch("security_scan.main.Path") as P:
         # `Path("/rules")` -> empty mount; bundled discovered via __file__ parent / "rules"
         def fake_path(arg):
             if arg == "/rules":
@@ -76,7 +76,7 @@ def test_resolver_skips_empty_rules_mount_falls_through_to_bundled(tmp_path: Pat
             return Path(arg)
         P.side_effect = fake_path
         # Make `Path(__file__).parent / "rules"` resolve to our bundled stub.
-        monkeypatch.setattr("secscan.main.__file__", str(bundled / "main.py"))
+        monkeypatch.setattr("security_scan.main.__file__", str(bundled / "main.py"))
         # Re-patching Path through to real Path for the parent / "rules" computation
         # is fiddly; instead, call the resolver but verify behavior through _has_rule_files.
 
@@ -90,7 +90,7 @@ def test_resolver_returns_auto_when_nothing_has_rules(tmp_path: Path, monkeypatc
     the resolver falls back to 'auto'."""
     no_rules_pkg = tmp_path / "pkg"
     no_rules_pkg.mkdir()
-    monkeypatch.setattr("secscan.main.__file__", str(no_rules_pkg / "main.py"))
+    monkeypatch.setattr("security_scan.main.__file__", str(no_rules_pkg / "main.py"))
     # Force the /rules check to fail (typical host system has no /rules)
     # by relying on the real filesystem; if /rules exists on the test host that's still
     # fine because it would have to contain *.yaml/yml/json to count.

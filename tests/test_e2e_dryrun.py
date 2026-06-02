@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from secscan.config import (
+from security_scan.config import (
     Config,
     PathsConfig,
     ProjectConfig,
@@ -25,10 +25,10 @@ from secscan.config import (
     SlackConfig,
     TriageConfig,
 )
-from secscan.fingerprint import parse_marker, resolve_fingerprint
-from secscan.github import ProjectContext, ProjectField
-from secscan.normalize import normalize_sarif
-from secscan.runners import RunnerResult
+from security_scan.fingerprint import parse_marker, resolve_fingerprint
+from security_scan.github import ProjectContext, ProjectField
+from security_scan.normalize import normalize_sarif
+from security_scan.runners import RunnerResult
 
 
 def _synthetic_repo(root: Path) -> None:
@@ -167,7 +167,7 @@ def _make_fake_gh(state="OPEN", existing_with_fp: list[str] | None = None) -> Ma
                 "number": i + 1,
                 "state": state,
                 "title": "old",
-                "body": f"prose\n<!-- secscan: fp={fp} rule=R cat=sast -->",
+                "body": f"prose\n<!-- security-scan: fp={fp} rule=R cat=sast -->",
             })
 
     fake_gh = MagicMock()
@@ -191,13 +191,13 @@ def _make_fake_gh(state="OPEN", existing_with_fp: list[str] | None = None) -> Ma
 
 
 def test_full_dryrun_pipeline_files_three_findings(cfg, tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
     fake_gh = _make_fake_gh()
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         rc = run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
     assert rc == 0
@@ -211,7 +211,7 @@ def test_full_dryrun_pipeline_files_three_findings(cfg, tmp_path):
 def test_dryrun_does_not_post_to_real_github(cfg, tmp_path):
     """The actual GitHub class in dry_run mode must make zero HTTP requests across
     issue creation AND every Projects v2 mutation."""
-    from secscan.github import GitHub
+    from security_scan.github import GitHub
 
     captured_requests = []
 
@@ -236,13 +236,13 @@ def test_dryrun_does_not_post_to_real_github(cfg, tmp_path):
 
 def test_marker_roundtrip_on_dryrun_bodies(cfg, tmp_path):
     """Every body that the pipeline would have posted must contain a parseable marker."""
-    from secscan.main import run
+    from security_scan.main import run
     fake_gh = _make_fake_gh()
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
     for issue in fake_gh.captured:
@@ -253,17 +253,17 @@ def test_marker_roundtrip_on_dryrun_bodies(cfg, tmp_path):
 
 def test_closed_existing_fingerprint_suppresses_refile(cfg, tmp_path):
     """The spec invariant: a closed project item with our fingerprint never refiles."""
-    from secscan.main import run
+    from security_scan.main import run
 
     findings = normalize_sarif(_semgrep_sarif(), "semgrep")
     semgrep_fp = resolve_fingerprint(findings[0])
 
     fake_gh = _make_fake_gh(state="CLOSED", existing_with_fp=[semgrep_fp])
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
     # 3 findings total; the semgrep one matches a closed-existing fp -> skip.
@@ -286,14 +286,14 @@ def test_fingerprint_survives_line_shift_in_source(cfg):
 
 def test_raw_secret_never_in_issue_body(cfg, tmp_path):
     """End-to-end check that the raw AWS key never reaches a posted body."""
-    from secscan.main import run
+    from security_scan.main import run
     raw_secret = "TEST_FAKE_SECRET_VALUE"
     fake_gh = _make_fake_gh()
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
     for issue in fake_gh.captured:

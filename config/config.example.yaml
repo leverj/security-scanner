@@ -1,8 +1,8 @@
-# secscan config — mount read-only at /config/config.yaml inside the container.
+# security-scan config — mount read-only at /config/config.yaml inside the container.
 # Secrets (token, Slack creds) come from env vars referenced by *_env keys below,
 # never from this file.
 #
-# The `secrets:` block below tells ./secscan.sh how to populate those env vars
+# The `secrets:` block below tells ./security-scan.sh how to populate those env vars
 # before invoking the container. Python code reads only os.environ, regardless.
 
 repo: "leverj/ezel"
@@ -11,7 +11,7 @@ ref: "dev"
 # Target a GitHub Projects v2 board. Findings file as flat items here — no
 # parent epic / sub-issue relationship. The board's URL is
 # https://github.com/orgs/<owner>/projects/<number>  (or /users/<owner>/...).
-# secscan idempotently provisions two single-select fields on first run:
+# security-scan idempotently provisions two single-select fields on first run:
 #   - Severity   (critical, high, medium, low, info)
 #   - Category   (dependency, secret, sast, iac, license)
 # PAT must have BOTH `repo` and `project` scopes.
@@ -20,7 +20,7 @@ project:
   number: 5
 github_token_env: "GITHUB_TOKEN"
 
-# How ./secscan.sh sources the env vars named in *_env keys above.
+# How ./security-scan.sh sources the env vars named in *_env keys above.
 #   source: env         -> assume GITHUB_TOKEN (etc.) are already exported in your shell
 #   source: 1password   -> auto-prefix with `op run --env-file=<env_file>`
 secrets:
@@ -47,7 +47,7 @@ scanners:
   codex: false              # OpenAI Codex via local `codex` CLI (uses your subscription)
   gemma: false              # Local Gemma 4 via Ollama
 
-# Codex CLI tunables. Auth is via `codex login` outside this tool; secscan
+# Codex CLI tunables. Auth is via `codex login` outside this tool; security-scan
 # never sees an API key. The CLI must be on PATH.
 codex:
   binary: "codex"
@@ -91,7 +91,7 @@ triage:
   # Timeout for the heavy paths (fuzzy-dedup, prose). A ~17 GB model's first
   # call of the day can take minutes; subsequent calls are fast (keep_alive).
   timeout: 600
-  # Start the model loading in a BACKGROUND thread when secscan starts so it
+  # Start the model loading in a BACKGROUND thread when security-scan starts so it
   # warms in parallel with the scanners. Strongly recommended for big models.
   prewarm: true
   # Slack intro is a single one-liner at the end; cap it tightly so a slow

@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from secscan.config import TriageConfig
-from secscan.fingerprint import inject_marker, resolve_fingerprint
-from secscan.models import Finding
-from secscan.triage import Triage, _finding_brief
+from security_scan.config import TriageConfig
+from security_scan.fingerprint import inject_marker, resolve_fingerprint
+from security_scan.models import Finding
+from security_scan.triage import Triage, _finding_brief
 
 
 def _f():
@@ -60,7 +60,7 @@ def test_fuzzy_dup_skipped_when_disabled():
 
 
 def test_intro_skipped_when_intro_disabled():
-    from secscan.sync import SyncResult
+    from security_scan.sync import SyncResult
     t = Triage(TriageConfig(enabled=True, intro_enabled=False, prewarm=False))
     with patch.object(t._session, "post") as p:
         text = t.write_slack_intro([_f()], SyncResult(), "o/n", "main", "owner", 9)
@@ -131,7 +131,7 @@ def test_finding_brief_never_includes_raw_secret():
 
 
 def test_no_candidates_means_no_chat():
-    """When all existing issues lack secscan markers, fuzzy-dup short-circuits."""
+    """When all existing issues lack security_scan markers, fuzzy-dup short-circuits."""
     t = Triage(TriageConfig(enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post") as p:
@@ -140,7 +140,7 @@ def test_no_candidates_means_no_chat():
 
 
 def test_slack_digest_returns_text():
-    from secscan.sync import SyncResult
+    from security_scan.sync import SyncResult
     t = Triage(TriageConfig(enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response("Hello digest")):

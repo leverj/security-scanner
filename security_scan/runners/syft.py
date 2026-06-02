@@ -1,10 +1,10 @@
 """Syft runner — produces a CycloneDX SBOM artifact for the scanned tree.
 
-Unlike the other scanners, Syft does not file sub-issues. It writes the SBOM
-to disk so it can be archived/uploaded by the caller. RunnerResult.sarif
-carries a small metadata dict (path + component count + format) so the
-orchestrator can log a one-line summary and downstream Slack digests can
-reference it.
+Unlike the other scanners, Syft does not file findings (no project items).
+It writes the SBOM to disk so it can be archived/uploaded by the caller.
+RunnerResult.sarif carries a small metadata dict (path + component count +
+format) so the orchestrator can log a one-line summary and downstream Slack
+digests can reference it.
 """
 
 from __future__ import annotations

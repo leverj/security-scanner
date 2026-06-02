@@ -1,7 +1,7 @@
 
 import pytest
 
-from secscan.config import ConfigError, load_config
+from security_scan.config import ConfigError, load_config
 
 
 def write(tmp_path, name, body):

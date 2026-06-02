@@ -1,4 +1,4 @@
-# secscan
+# security-scan
 
 [![CI](https://github.com/leverj/security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/leverj/security-scanner/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -17,27 +17,27 @@ Closing/fixing findings is out of scope — another system owns that.
 ```bash
 # 1. Create (or pick) a GitHub Projects v2 board for security findings.
 #    Note its number (visible in the URL: /projects/<number>).
-#    On first run secscan provisions two single-select fields on the board:
+#    On first run security-scan provisions two single-select fields on the board:
 #      - Severity   (critical, high, medium, low, info)
 #      - Category   (dependency, secret, sast, iac, license)
 
 # 2. Copy the example config
-cp config.example.yaml config.yaml
-$EDITOR config.yaml          # set repo, ref, project.owner, project.number
+cp config/config.example.yaml config/config.yaml
+$EDITOR config/config.yaml   # set repo, ref, project.owner, project.number
 
 # 3. Set up secrets — pick ONE of the two paths in the next section
 
 # 4. Verify your setup, then run
-./secscan.sh check           # green checks across the board?
-./secscan.sh build
-./secscan.sh run             # defaults to --dry-run; add --no-dry-run to actually file issues
+./security-scan.sh check           # green checks across the board?
+./security-scan.sh build
+./security-scan.sh run             # defaults to --dry-run; add --no-dry-run to actually file issues
 ```
 
 ---
 
 ## Setup: secrets
 
-secscan needs a GitHub Personal Access Token, and optionally a Slack webhook URL.
+security-scan needs a GitHub Personal Access Token, and optionally a Slack webhook URL.
 **Secrets never go into `config.yaml`** — they come in via env vars at runtime.
 
 `config.yaml` declares which path you're using:
@@ -68,7 +68,7 @@ export GITHUB_TOKEN=github_pat_...
 # Optional Slack — get a webhook from https://api.slack.com/apps
 export SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 
-./secscan.sh run
+./security-scan.sh run
 ```
 
 To persist, put the `export` lines in `~/.zshrc` or `~/.bashrc`. The script verifies
@@ -86,8 +86,8 @@ brew install 1password-cli
 op signin
 
 # Copy the template and edit the vault/item paths to point at your own entries
-cp .env.1password.tpl.example .env.1password.tpl
-$EDITOR .env.1password.tpl
+cp config/.env.1password.tpl.example config/.env.1password.tpl
+$EDITOR config/.env.1password.tpl
 ```
 
 `.env.1password.tpl` then looks like:
@@ -105,7 +105,7 @@ secrets:
 ```
 
 ```bash
-./secscan.sh run          # auto-wraps with: op run --env-file=.env.1password.tpl -- docker run ...
+./security-scan.sh run          # auto-wraps with: op run --env-file=.env.1password.tpl -- docker run ...
 ```
 
 The file `.env.1password.tpl` is `.gitignore`d. The committed
@@ -116,7 +116,7 @@ and never commit your filled-in copy.
 
 For container orchestrators (Docker Swarm, K8s, GitHub Actions, etc.), populate
 `GITHUB_TOKEN` (and friends) via your platform's secret mechanism so it appears
-in the container's environment. With `secrets.source: env`, `secscan.sh` (or a
+in the container's environment. With `secrets.source: env`, `security-scan.sh` (or a
 direct `docker run`) will pick it up.
 
 ---
@@ -136,7 +136,7 @@ need re-surfacing of regressions, that's the external fixing system's concern.
 
 ## Troubleshooting
 
-`./secscan.sh check` reports the status of every prerequisite:
+`./security-scan.sh check` reports the status of every prerequisite:
 
 ```
 == config ==
@@ -144,7 +144,7 @@ need re-surfacing of regressions, that's the external fixing system's concern.
 == docker ==
   ✓ docker is running
 == image ==
-  ✓ secscan:latest present              # ⚠ "not built yet" if you skipped `build`
+  ✓ security-scan:latest present              # ⚠ "not built yet" if you skipped `build`
 == secrets (1password) ==
   ✓ op (1Password CLI) installed
   ✓ op signed in
@@ -157,12 +157,12 @@ Common failure modes and what `check` says:
 
 | Symptom | Fix |
 |---|---|
-| `config not found` | `cp config.example.yaml config.yaml` |
+| `config not found` | `cp config/config.example.yaml config/config.yaml` |
 | `GITHUB_TOKEN unset` (env source) | `export GITHUB_TOKEN=…` or switch to `secrets.source: "1password"` |
 | `op not installed` (1Password source) | `brew install 1password-cli && op signin` |
-| `.env.1password.tpl missing` | `cp .env.1password.tpl.example .env.1password.tpl && $EDITOR …` |
+| `.env.1password.tpl missing` | `cp config/.env.1password.tpl.example config/.env.1password.tpl && $EDITOR …` |
 | `SLACK_… unset` (slack.enabled=true) | Either export the var, add it to the 1Password env file, or set `slack.enabled: false` |
-| `image not built yet` | `./secscan.sh build` |
+| `image not built yet` | `./security-scan.sh build` |
 | `docker daemon not reachable` | Start Docker Desktop |
 
 ---
@@ -176,10 +176,28 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 The scanner binaries (osv-scanner, gitleaks, semgrep) live only inside the Docker
 image — local tests use SARIF fixtures and mocked subprocesses. To exercise the
-real binaries, run via `./secscan.sh run`.
+real binaries, run via `./security-scan.sh run`.
 
 ---
 
+## Use as a Claude Code skill
+
+The companion bundle at [`leverj/ai-skills`](https://github.com/leverj/ai-skills)
+ships a `security-scan` skill that drives this image directly:
+
+```
+/plugin marketplace add leverj/ai-skills
+/plugin install leverj@leverj-ai-skills
+# then: /leverj:security-scan run
+```
+
+The skill pulls and runs the published Docker image
+`leverj/security-scan:<tag>`, bind-mounts your `config/` directory at
+`/config:ro`, and offers a user-confirmed upgrade flow when a newer image
+version is available (the image ships a `SECURITY-SCAN-MANIFEST.yaml` describing
+its version + any config fields the skill should add to your local
+`config.yaml`).
+
 ## Spec
 
-See [secscan-spec.md](secscan-spec.md) for the full design.
+See [security-scan-spec.md](security-scan-spec.md) for the full design.

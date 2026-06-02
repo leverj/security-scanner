@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, patch
 
-from secscan.config import SlackConfig
-from secscan.models import Finding
-from secscan.notify import _default_digest, post_digest
-from secscan.sync import SyncResult
+from security_scan.config import SlackConfig
+from security_scan.models import Finding
+from security_scan.notify import _default_digest, post_digest
+from security_scan.sync import SyncResult
 
 
 def _f(sev):
@@ -12,7 +12,7 @@ def _f(sev):
 
 def test_disabled_slack_is_noop(monkeypatch):
     slack = SlackConfig(enabled=False)
-    monkeypatch.setattr("secscan.notify.requests.post", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("called")))
+    monkeypatch.setattr("security_scan.notify.requests.post", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("called")))
     assert post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1) is False
 
 
@@ -20,12 +20,12 @@ def test_webhook_called_with_text(monkeypatch):
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
     resp = MagicMock(status_code=200)
-    with patch("secscan.notify.requests.post", return_value=resp) as mp:
+    with patch("security_scan.notify.requests.post", return_value=resp) as mp:
         ok = post_digest(slack, [_f("high")], SyncResult(created=[{"number": 1}]), "o/n", "main", "owner", 42)
     assert ok is True
     args, kwargs = mp.call_args
     assert args[0] == "https://hooks.slack.test/x"
-    assert "secscan" in kwargs["json"]["text"]
+    assert "security_scan" in kwargs["json"]["text"]
 
 
 def test_webhook_missing_env_returns_false(monkeypatch, capsys):
@@ -40,7 +40,7 @@ def test_chat_postmessage_used_when_channel_set(monkeypatch):
     slack = SlackConfig(enabled=True, channel_id_env="SLACK_CHANNEL_ID", bot_token_env="SLACK_BOT_TOKEN")
     resp = MagicMock(status_code=200)
     resp.json.return_value = {"ok": True}
-    with patch("secscan.notify.requests.post", return_value=resp) as mp:
+    with patch("security_scan.notify.requests.post", return_value=resp) as mp:
         ok = post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1)
     assert ok is True
     assert mp.call_args.args[0] == "https://slack.com/api/chat.postMessage"
@@ -97,7 +97,7 @@ def test_default_digest_below_floor_only_says_so():
 
 
 def test_default_digest_groups_by_category():
-    from secscan.models import Finding
+    from security_scan.models import Finding
     findings = [
         Finding("trivy", "dependency", "CVE-2024-1", "critical", "package-lock.json", 1, "t", "m",
                 extra={"package": "left-pad", "installed_version": "1.0.0",
@@ -123,7 +123,7 @@ def test_default_digest_groups_by_category():
 def test_one_liner_does_not_repeat_rule_id_when_package_extra_missing():
     """OSV often leaves extras empty; the message text has the package name.
     Don't render '`CVE-X` · `CVE-X` · no fix' — that's noise."""
-    from secscan.models import Finding
+    from security_scan.models import Finding
     f = Finding(
         "osv", "dependency", "CVE-2026-33169", "medium",
         "Gemfile.lock", 1, "title",
@@ -142,7 +142,7 @@ def test_one_liner_does_not_repeat_rule_id_when_package_extra_missing():
 
 
 def test_default_digest_caps_per_section():
-    from secscan.models import Finding
+    from security_scan.models import Finding
     findings = [
         Finding("semgrep", "sast", f"rule-{i}", "medium", "f.js", i, f"t{i}", "m")
         for i in range(10)
@@ -162,7 +162,7 @@ def test_intro_is_prepended_to_structured_digest(monkeypatch):
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
     resp = MagicMock(status_code=200)
     actionable = [_f("high"), _f("medium")]
-    with patch("secscan.notify.requests.post", return_value=resp) as mp:
+    with patch("security_scan.notify.requests.post", return_value=resp) as mp:
         post_digest(
             slack, actionable,
             SyncResult(created=[{"n": 1}, {"n": 2}], created_findings=actionable),
@@ -180,7 +180,7 @@ def test_digest_text_legacy_param_still_overrides(monkeypatch):
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
     resp = MagicMock(status_code=200)
-    with patch("secscan.notify.requests.post", return_value=resp) as mp:
+    with patch("security_scan.notify.requests.post", return_value=resp) as mp:
         post_digest(slack, [_f("high")], SyncResult(), "o/n", "main", "owner", 9,
                     digest_text="exact replacement")
     assert mp.call_args.kwargs["json"]["text"] == "exact replacement"
@@ -190,6 +190,6 @@ def test_failure_is_non_blocking(monkeypatch):
     import requests
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
-    with patch("secscan.notify.requests.post", side_effect=requests.ConnectionError("down")):
+    with patch("security_scan.notify.requests.post", side_effect=requests.ConnectionError("down")):
         ok = post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1)
     assert ok is False  # didn't raise

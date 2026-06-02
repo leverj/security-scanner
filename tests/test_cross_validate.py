@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from secscan.cross_validate import cross_validate
-from secscan.models import Finding
+from security_scan.cross_validate import cross_validate
+from security_scan.models import Finding
 
 
 def _f(scanner, rule_id, severity="high"):
@@ -66,9 +66,9 @@ def test_disabled_when_only_one_scanner_enabled(tmp_path):
 
 def test_gemma_marks_codex_finding_real_keeps_severity(tmp_path):
     f = _f("codex", "auth.foo", severity="high")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.requests.post",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post",
                return_value=_ollama_ok({"verdict": "real", "reason": "definitely real"})):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     cv = f.extra["cross_validation"]
@@ -81,9 +81,9 @@ def test_gemma_marks_codex_finding_real_keeps_severity(tmp_path):
 
 def test_gemma_marks_codex_finding_false_positive_downgrades(tmp_path):
     f = _f("codex", "auth.foo", severity="high")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.requests.post",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post",
                return_value=_ollama_ok({"verdict": "false_positive", "reason": "not exploitable"})):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     cv = f.extra["cross_validation"]
@@ -96,9 +96,9 @@ def test_critical_never_auto_downgrades_on_fp(tmp_path):
     """Asymmetric guardrail: critical findings stay critical even if the
     validator disagrees. The cost of missing a real critical is too high."""
     f = _f("codex", "rce.eval", severity="critical")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.requests.post",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post",
                return_value=_ollama_ok({"verdict": "false_positive", "reason": "looks fine"})):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     assert f.severity == "critical"  # protected
@@ -108,9 +108,9 @@ def test_critical_never_auto_downgrades_on_fp(tmp_path):
 
 def test_uncertain_does_not_downgrade(tmp_path):
     f = _f("codex", "auth.foo", severity="high")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.requests.post",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post",
                return_value=_ollama_ok({"verdict": "uncertain", "reason": "can't tell"})):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     assert f.severity == "high"
@@ -119,9 +119,9 @@ def test_uncertain_does_not_downgrade(tmp_path):
 
 def test_unrecognized_verdict_treated_as_uncertain(tmp_path):
     f = _f("codex", "x", severity="medium")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.requests.post",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post",
                return_value=_ollama_ok({"verdict": "OBVIOUSLY_FAKE", "reason": "what"})):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     assert f.severity == "medium"
@@ -130,9 +130,9 @@ def test_unrecognized_verdict_treated_as_uncertain(tmp_path):
 
 def test_codex_marks_gemma_finding_false_positive_downgrades(tmp_path):
     f = _f("gemma", "py.eval", severity="high")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.subprocess.run",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.subprocess.run",
                side_effect=_codex_completed(0, {"verdict": "false_positive",
                                                 "reason": "test code, not prod"})):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
@@ -146,8 +146,8 @@ def test_ollama_unreachable_skips_gemma_review(tmp_path):
     """If Ollama can't be reached, codex findings simply get no review — not failure."""
     import requests
     f = _f("codex", "x", severity="high")
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get",
                side_effect=requests.ConnectionError("down")):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     assert "cross_validation" not in (f.extra or {})
@@ -156,8 +156,8 @@ def test_ollama_unreachable_skips_gemma_review(tmp_path):
 
 def test_codex_missing_skips_codex_review_of_gemma_findings(tmp_path):
     f = _f("gemma", "x", severity="high")
-    with patch("secscan.cross_validate.shutil.which", return_value=None), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()):
+    with patch("security_scan.cross_validate.shutil.which", return_value=None), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     # Gemma finding not reviewed because codex CLI is missing.
     assert "cross_validation" not in (f.extra or {})
@@ -168,9 +168,9 @@ def test_validator_failure_yields_uncertain(tmp_path):
     verdict — never block the finding or crash the run."""
     f = _f("codex", "x", severity="high")
     import requests
-    with patch("secscan.cross_validate.shutil.which", return_value="/x/codex"), \
-         patch("secscan.cross_validate.requests.get", return_value=_ping_ok()), \
-         patch("secscan.cross_validate.requests.post",
+    with patch("security_scan.cross_validate.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.cross_validate.requests.get", return_value=_ping_ok()), \
+         patch("security_scan.cross_validate.requests.post",
                side_effect=requests.ConnectionError("post failed")):
         cross_validate([f], repo_dir=tmp_path, codex_enabled=True, gemma_enabled=True)
     cv = f.extra["cross_validation"]

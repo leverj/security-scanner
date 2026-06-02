@@ -19,11 +19,11 @@ import requests
 
 _API = "https://api.github.com"
 _GRAPHQL = "https://api.github.com/graphql"
-_UA = "secscan/0.1"
+_UA = "security_scan/0.1"
 _ACCEPT = "application/vnd.github+json"
 _API_VERSION = "2022-11-28"
 
-# Single-select options + colors that secscan creates on the target Project v2 if
+# Single-select options + colors that security_scan creates on the target Project v2 if
 # the user hasn't created them already. GitHub's `ProjectV2SingleSelectFieldOptionColor`
 # enum accepts: GRAY, BLUE, GREEN, YELLOW, ORANGE, RED, PINK, PURPLE.
 _SEVERITY_OPTIONS: list[tuple[str, str]] = [
@@ -131,7 +131,7 @@ class GitHub:
 
     def resolve_project(self, owner: str, number: int) -> ProjectContext:
         """Find the Projects v2 board by (owner, number). Idempotently ensures
-        single-select `Severity` and `Category` fields exist with the secscan
+        single-select `Severity` and `Category` fields exist with the security_scan
         option set. Re-running is safe.
         """
         if self.dry_run:
@@ -257,18 +257,18 @@ class GitHub:
     # Color palette per category/severity. Anything unmapped becomes mid-grey.
     _LABEL_COLOR = {
         # categories
-        "secscan:dependency": "5319e7",        # purple — language/OS package CVEs
-        "secscan:secret": "d93f0b",            # red — pattern-matched secret
-        "secscan:secret-verified": "b60205",   # dark red — live/verified secret
-        "secscan:sast": "fbca04",              # yellow — code patterns
-        "secscan:iac": "0e8a16",               # green — IaC misconfig
-        "secscan:license": "1d76db",           # blue — license issues
+        "security-scan:dependency": "5319e7",        # purple — language/OS package CVEs
+        "security-scan:secret": "d93f0b",            # red — pattern-matched secret
+        "security-scan:secret-verified": "b60205",   # dark red — live/verified secret
+        "security-scan:sast": "fbca04",              # yellow — code patterns
+        "security-scan:iac": "0e8a16",               # green — IaC misconfig
+        "security-scan:license": "1d76db",           # blue — license issues
         # severities
-        "secscan:critical": "b60205",
-        "secscan:high":     "d93f0b",
-        "secscan:medium":   "fbca04",
-        "secscan:low":      "c5def5",
-        "secscan:info":     "ededed",
+        "security-scan:critical": "b60205",
+        "security-scan:high":     "d93f0b",
+        "security-scan:medium":   "fbca04",
+        "security-scan:low":      "c5def5",
+        "security-scan:info":     "ededed",
     }
     _LABEL_CREATED: set[str]  # populated in __init__
 
@@ -282,7 +282,7 @@ class GitHub:
             self._request(
                 "POST",
                 f"{_API}/repos/{self.owner}/{self.name}/labels",
-                json={"name": name, "color": color, "description": "secscan-managed label"},
+                json={"name": name, "color": color, "description": "security_scan-managed label"},
             )
         except GitHubError as e:
             # 422 = label already exists with this name; anything else is a real problem.
@@ -346,7 +346,7 @@ class GitHub:
             if missing:
                 print(
                     f"github: project field {name!r} is missing options {missing}; "
-                    "secscan won't be able to set those values until you add them",
+                    "security_scan won't be able to set those values until you add them",
                     file=sys.stderr,
                 )
             return ProjectField(id=existing["id"], options=opts)

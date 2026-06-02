@@ -11,7 +11,7 @@ import json
 import sys
 from fnmatch import fnmatchcase
 
-from secscan.models import Finding, normalize_severity
+from security_scan.models import Finding, normalize_severity
 
 _CATEGORY = {
     "osv": "dependency",

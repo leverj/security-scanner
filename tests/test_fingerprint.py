@@ -1,10 +1,10 @@
-from secscan.fingerprint import (
+from security_scan.fingerprint import (
     compute_fingerprint,
     inject_marker,
     parse_marker,
     resolve_fingerprint,
 )
-from secscan.models import Finding
+from security_scan.models import Finding
 
 
 def _sast(file_path="src/a.js", line=10, snippet="exec(userInput)"):
@@ -96,11 +96,11 @@ def test_marker_idempotent_inject():
     body = inject_marker("prose", fp, f)
     body2 = inject_marker(body, fp, f)
     # Should not duplicate the marker
-    assert body2.count("<!-- secscan:") == 1
+    assert body2.count("<!-- security-scan:") == 1
 
 
 def test_parse_marker_returns_none_for_missing():
     assert parse_marker(None) is None
     assert parse_marker("") is None
     assert parse_marker("no marker here") is None
-    assert parse_marker("<!-- secscan: malformed -->") is None
+    assert parse_marker("<!-- security-scan: malformed -->") is None

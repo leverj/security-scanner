@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "secscan"
-version = "0.1.0"
-description = "Stateless single-repo security scanner that files findings as GitHub sub-issues"
+name = "security-scan"
+version = "0.2.0"
+description = "Stateless single-repo security scanner; files findings into a GitHub Projects v2 board"
 requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0",
@@ -20,14 +20,14 @@ dev = [
 ]
 
 [project.scripts]
-secscan = "secscan.main:cli"
+security-scan = "security_scan.main:cli"
 
 [tool.setuptools.packages.find]
-include = ["secscan*"]
+include = ["security_scan*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-secscan = ["rules/**/*.yaml", "rules/**/*.yml"]
+security_scan = ["rules/**/*.yaml", "rules/**/*.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -131,7 +131,7 @@ def run(
     if shutil.which(binary) is None:
         return RunnerResult("codex", None, False, f"binary not found: {binary}")
 
-    with tempfile.TemporaryDirectory(prefix="codex-secscan-") as td:
+    with tempfile.TemporaryDirectory(prefix="codex-security_scan-") as td:
         schema_path = Path(td) / "schema.json"
         output_path = Path(td) / "output.json"
         schema_path.write_text(json.dumps(_SCHEMA))
@@ -160,7 +160,7 @@ def run(
                 text=True,
                 timeout=timeout,
                 check=False,
-                # Don't inherit secscan's env wholesale — keep CODEX_HOME etc., but
+                # Don't inherit security_scan's env wholesale — keep CODEX_HOME etc., but
                 # strip anything that might confuse the agent. Codex reads its own
                 # config from ~/.codex/.
                 env={**os.environ},

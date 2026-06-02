@@ -39,7 +39,7 @@ from pathlib import Path
 
 import requests
 
-from secscan.models import SEVERITY_ORDER, Finding
+from security_scan.models import SEVERITY_ORDER, Finding
 
 # Severity downgrade ladder. Critical is intentionally NOT downgraded — the
 # asymmetry is deliberate (worst case for FP-on-critical is one extra issue

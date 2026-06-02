@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from secscan.normalize import normalize_sarif
-from secscan.runners import syft as syft_runner
-from secscan.runners import trivy as trivy_runner
-from secscan.runners import trufflehog as trufflehog_runner
+from security_scan.normalize import normalize_sarif
+from security_scan.runners import syft as syft_runner
+from security_scan.runners import trivy as trivy_runner
+from security_scan.runners import trufflehog as trufflehog_runner
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -26,14 +26,14 @@ def _completed(rc=0, stdout="", stderr=""):
 
 def test_trivy_runner_happy_path(tmp_path):
     sarif = (FIXTURES / "sarif" / "trivy.json").read_text()
-    with patch("secscan.runners.subprocess.run", return_value=_completed(0, sarif, "")):
+    with patch("security_scan.runners.subprocess.run", return_value=_completed(0, sarif, "")):
         result = trivy_runner.run(tmp_path)
     assert result.completed and result.sarif is not None
     assert result.scanner == "trivy"
 
 
 def test_trivy_cmd_includes_all_scanners(tmp_path):
-    with patch("secscan.runners.subprocess.run", return_value=_completed(0, "{}", "")) as m:
+    with patch("security_scan.runners.subprocess.run", return_value=_completed(0, "{}", "")) as m:
         trivy_runner.run(tmp_path, exclude=["vendor/"])
     cmd = m.call_args.args[0]
     # Joined --scanners value
@@ -73,7 +73,7 @@ def test_trivy_exclude_filter(tmp_path):
 
 
 def test_trivy_binary_not_found(tmp_path):
-    with patch("secscan.runners.subprocess.run", side_effect=FileNotFoundError("trivy")):
+    with patch("security_scan.runners.subprocess.run", side_effect=FileNotFoundError("trivy")):
         result = trivy_runner.run(tmp_path)
     assert not result.completed
     assert "binary not found" in (result.error or "")
@@ -84,7 +84,7 @@ def test_trivy_binary_not_found(tmp_path):
 
 def test_trufflehog_runner_wraps_jsonl(tmp_path):
     jsonl = (FIXTURES / "trufflehog.jsonl").read_text()
-    with patch("secscan.runners.subprocess.run", return_value=_completed(0, jsonl, "")):
+    with patch("security_scan.runners.subprocess.run", return_value=_completed(0, jsonl, "")):
         result = trufflehog_runner.run(tmp_path)
     assert result.completed
     assert isinstance(result.sarif, dict)
@@ -134,7 +134,7 @@ def test_trufflehog_skips_unparseable_lines(tmp_path, capsys):
 
 
 def test_trufflehog_exit_code_nonzero_is_failure(tmp_path):
-    with patch("secscan.runners.subprocess.run", return_value=_completed(2, "", "config error")):
+    with patch("security_scan.runners.subprocess.run", return_value=_completed(2, "", "config error")):
         result = trufflehog_runner.run(tmp_path)
     assert not result.completed
     assert "exit 2" in (result.error or "")
@@ -157,7 +157,7 @@ def test_syft_runner_writes_sbom(tmp_path):
         p.stderr = ""
         return p
 
-    with patch("secscan.runners.subprocess.run", side_effect=fake_run):
+    with patch("security_scan.runners.subprocess.run", side_effect=fake_run):
         result = syft_runner.run(tmp_path, output_path=sbom_path)
     assert result.completed
     meta = result.sarif["_syft_sbom"]
@@ -168,13 +168,13 @@ def test_syft_runner_writes_sbom(tmp_path):
 
 def test_syft_runner_failure_missing_output(tmp_path):
     sbom_path = tmp_path / "should-not-exist.json"
-    with patch("secscan.runners.subprocess.run", return_value=_completed(0, "", "")):
+    with patch("security_scan.runners.subprocess.run", return_value=_completed(0, "", "")):
         result = syft_runner.run(tmp_path, output_path=sbom_path)
     assert not result.completed
 
 
 def test_syft_binary_not_found(tmp_path):
-    with patch("secscan.runners.subprocess.run", side_effect=FileNotFoundError("syft")):
+    with patch("security_scan.runners.subprocess.run", side_effect=FileNotFoundError("syft")):
         result = syft_runner.run(tmp_path, output_path=tmp_path / "x.json")
     assert not result.completed
     assert "binary not found" in (result.error or "")

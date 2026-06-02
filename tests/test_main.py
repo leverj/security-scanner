@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from secscan.config import (
+from security_scan.config import (
     Config,
     PathsConfig,
     ProjectConfig,
@@ -12,8 +12,8 @@ from secscan.config import (
     SlackConfig,
     TriageConfig,
 )
-from secscan.github import ProjectContext, ProjectField
-from secscan.runners import RunnerResult
+from security_scan.github import ProjectContext, ProjectField
+from security_scan.runners import RunnerResult
 
 
 def _cfg(tmp_path, **kw):
@@ -115,7 +115,7 @@ def _fresh_gh(dry_run=False):
 
 
 def test_e2e_dry_run_creates_no_issues(tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
     repo_dir = tmp_path / "name"
     _populate_synthetic_repo(repo_dir)
 
@@ -123,10 +123,10 @@ def test_e2e_dry_run_creates_no_issues(tmp_path):
     fake_gh = _fresh_gh(dry_run=True)
 
     results = _scanner_results()
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=results["osv"]) as o, \
-         patch("secscan.runners.gitleaks.run", return_value=results["gitleaks"]) as gl, \
-         patch("secscan.runners.semgrep.run", return_value=results["semgrep"]) as sg:
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=results["osv"]) as o, \
+         patch("security_scan.runners.gitleaks.run", return_value=results["gitleaks"]) as gl, \
+         patch("security_scan.runners.semgrep.run", return_value=results["semgrep"]) as sg:
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
@@ -139,7 +139,7 @@ def test_e2e_dry_run_creates_no_issues(tmp_path):
 
 
 def test_e2e_creates_issues_when_not_dry_run(tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
     repo_dir = tmp_path / "name"
     _populate_synthetic_repo(repo_dir)
 
@@ -147,10 +147,10 @@ def test_e2e_creates_issues_when_not_dry_run(tmp_path):
     fake_gh = _fresh_gh(dry_run=False)
 
     results = _scanner_results()
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=results["osv"]), \
-         patch("secscan.runners.gitleaks.run", return_value=results["gitleaks"]), \
-         patch("secscan.runners.semgrep.run", return_value=results["semgrep"]):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=results["osv"]), \
+         patch("security_scan.runners.gitleaks.run", return_value=results["gitleaks"]), \
+         patch("security_scan.runners.semgrep.run", return_value=results["semgrep"]):
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=False, work_dir=str(tmp_path), keep_work=True)
 
@@ -163,17 +163,17 @@ def test_e2e_creates_issues_when_not_dry_run(tmp_path):
 
 
 def test_failed_scanner_does_not_block_others(tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
     repo_dir = tmp_path / "name"
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path)
     fake_gh = _fresh_gh(dry_run=False)
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", None, False, "binary not found")), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", None, False, "binary not found")), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=False, work_dir=str(tmp_path), keep_work=True)
 
@@ -182,17 +182,17 @@ def test_failed_scanner_does_not_block_others(tmp_path):
 
 
 def test_all_scanners_fail_returns_error(tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
     repo_dir = tmp_path / "name"
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path)
     fake_gh = _fresh_gh(dry_run=False)
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", None, False, "x")), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", None, False, "x")), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", None, False, "x")):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", None, False, "x")), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", None, False, "x")), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", None, False, "x")):
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=False, work_dir=str(tmp_path), keep_work=True)
 
@@ -202,15 +202,15 @@ def test_all_scanners_fail_returns_error(tmp_path):
 
 def test_repo_dir_is_wiped_even_when_work_dir_provided(tmp_path):
     """Security: the clone must be removed even when the caller supplied --work-dir."""
-    from secscan.main import run
+    from security_scan.main import run
 
     cfg = _cfg(tmp_path)
     fake_gh = _fresh_gh(dry_run=False)
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=False, work_dir=str(tmp_path), keep_work=False)
 
@@ -220,15 +220,15 @@ def test_repo_dir_is_wiped_even_when_work_dir_provided(tmp_path):
 
 
 def test_keep_work_preserves_clone(tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
 
     cfg = _cfg(tmp_path)
     fake_gh = _fresh_gh(dry_run=True)
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         fake_gh.clone.side_effect = _clone_populates(None)
         run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
@@ -236,17 +236,17 @@ def test_keep_work_preserves_clone(tmp_path):
 
 
 def test_severity_floor_skips_low_findings(tmp_path):
-    from secscan.main import run
+    from security_scan.main import run
     repo_dir = tmp_path / "name"
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path, severity_floor="critical")  # only critical
     fake_gh = _fresh_gh(dry_run=False)
 
-    with patch("secscan.main.GitHub", return_value=fake_gh), \
-         patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
-         patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
-         patch("secscan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=False, work_dir=str(tmp_path), keep_work=True)
 
