@@ -71,6 +71,7 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         _log_detection(detection)
 
         findings, completed_scanners, failed, sbom_artifacts = _scan_and_normalize(detection, cfg, repo_dir)
+        _scan_images(cfg, repo_dir, findings, completed_scanners, failed)
         _log_scanner_summary(completed_scanners, failed)
         for sbom in sbom_artifacts:
             print(
@@ -236,6 +237,66 @@ def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules:
             exclude=cfg.paths.exclude,
         )
     return RunnerResult(t.scanner, None, False, f"unknown scanner: {t.scanner}")
+
+
+def _scan_images(
+    cfg: Config, repo_dir: Path,
+    findings: list[Finding], completed: list[str], failed: list[tuple[str, str]],
+) -> None:
+    """Image-scan lane (issue #9). Runs `trivy image` over base images parsed
+    from the repo's Dockerfile(s) and, if opt-in is set, over a pulled or
+    locally-built image. Findings are appended to `findings` and the scanner
+    name `image:<source>` is added to completed/failed lists for the summary
+    line.
+
+    Unlike per-target scanners, this can emit multiple RunnerResults — one per
+    image — so it's wired in directly rather than through `_invoke_runner`."""
+    cfg_img = cfg.image_scan
+    if not (cfg_img.base_images or cfg_img.built_image.enabled):
+        return
+
+    from security_scan.runners.image import ImageScanConfig as _ImageScanConfig
+    from security_scan.runners.image import run as _image_run
+
+    img_cfg = _ImageScanConfig(
+        base_images=cfg_img.base_images,
+        built_image_enabled=cfg_img.built_image.enabled,
+        built_image_ref=cfg_img.built_image.ref,
+        build_locally=cfg_img.built_image.build_locally,
+        timeout=cfg_img.timeout,
+        trivy_binary=cfg_img.trivy_binary,
+        docker_binary=cfg_img.docker_binary,
+    )
+
+    results = _image_run(repo_dir, img_cfg)
+    if not results:
+        return
+
+    any_done = False
+    for r in results:
+        if r.completed and r.sarif is not None:
+            new = normalize_sarif(r.sarif, "image", cfg.paths.exclude)
+            findings.extend(new)
+            any_done = True
+        elif r.error:
+            # One image-scan failure shouldn't blanket-skip the others.
+            failed.append((f"image:{_image_label(r)}", r.error))
+    if any_done and "image" not in completed:
+        completed.append("image")
+
+
+def _image_label(r: RunnerResult) -> str:
+    """Best-effort label for image-scan failures. SARIF carries the image_ref
+    in result.properties; for outright failures (no SARIF) we fall back to
+    `unknown`."""
+    if not r.sarif:
+        return "unknown"
+    for run in (r.sarif.get("runs") or []):
+        for res in (run.get("results") or []):
+            ref = (res.get("properties") or {}).get("security_scan_image_ref")
+            if ref:
+                return str(ref)
+    return "unknown"
 
 
 def _absorb(

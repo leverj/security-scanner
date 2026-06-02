@@ -27,13 +27,14 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.2.4"
-config_schema_version: 2
+version: "0.3.0"
+config_schema_version: 3
 docker_image: "leverj/security-scan"
 released: "2026-06-02"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
+  - "0.3.0: image-scanning lane (epic #9). Three modes — Dockerfile audit (already covered by trivy fs misconfig), `base_images` (run `trivy image` over every FROM ref in the repo's Dockerfile(s); ON by default), and opt-in `built_image` (pull and scan a published ref OR `docker build .` the cloned tree). Findings get the new `category: image` on the Projects v2 board (skill should add this option to the Category single-select field on upgrade). `build_locally` requires the docker socket AND `SECURITY_SCAN_ALLOW_BUILD=1` in env — it's the one opt-in exception to the otherwise-strict 'never execute repo code' invariant."
   - "0.2.4: secret redaction before remote LLMs — Codex/Gemma SAST and cross-validation now scrub known-token shapes (AWS, GitHub, Stripe, Slack, Google, JWT, PEM, OpenAI-style sk-…) and high-entropy substrings (≥ 4.0 bits/char over ≥ 20 chars) from any source content before send. Non-loopback base_urls are refused (gemma scanner, cross-validate, triage) — no plaintext or redacted source leaves the box to a public host."
   - "0.2.3: only `:latest` is published from now on (no more per-version tags accumulating on Docker Hub). The consumer skill detects new releases by watching the image digest, not the tag. The `version` field here is the human-readable identifier shown on the upgrade prompt — image identity remains the digest."
   - "0.2.2: CVE cleanup — bumped scanner pins (osv-scanner 2.3.8, gitleaks 8.30.1, trivy 0.71.0, trufflehog 3.95.5, semgrep 1.164.0) so each embeds a current Go stdlib; base bumped python:3.13-slim → python:3.14-slim; pip/wheel/setuptools upgraded together. Residual high-impact CVE (CVE-2025-68121 in Go 1.24.11) is inside gitleaks 8.30.1 — fix is upstream."
@@ -57,6 +58,26 @@ config:
   # `default` is the value to insert. `since` is the schema version that
   # introduced the field — skills can use it to decide whether to apply.
   new_fields:
+    - path: "image_scan.base_images"
+      since: 3
+      default: true
+      note: "Run `trivy image` over every FROM ref in the repo's Dockerfile(s). Cached via the local image cache after first pull."
+    - path: "image_scan.built_image.enabled"
+      since: 3
+      default: false
+      note: "Master toggle for the built-image lane. Off by default; opt-in scan of a published image (ref) or a docker-built image (build_locally)."
+    - path: "image_scan.built_image.ref"
+      since: 3
+      default: null
+      note: "If set: pull this image and scan it. Same trust boundary as `docker pull`."
+    - path: "image_scan.built_image.build_locally"
+      since: 3
+      default: false
+      note: "If true: `docker build .` the cloned repo and scan the result. Requires docker socket mounted AND SECURITY_SCAN_ALLOW_BUILD=1 in env."
+    - path: "image_scan.timeout"
+      since: 3
+      default: 600
+      note: "Per `trivy image` call (seconds)."
     - path: "project.owner"
       since: 2
       required: true

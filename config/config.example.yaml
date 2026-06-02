@@ -74,6 +74,26 @@ cross_validate:
   codex_timeout: 300        # per-finding budget when codex reviews a gemma flag
   gemma_timeout: 180        # per-finding budget when gemma reviews a codex flag
 
+# Image-scanning lane (epic #9). Three modes:
+#   A) Dockerfile audit — handled by Trivy's misconfig scanner (no separate
+#      knob here; controlled by `scanners.trivy` above).
+#   B) base_images — for every `FROM` line in the repo's Dockerfile(s), run
+#      `trivy image <ref>` to catch CVEs in the base. ON by default; cached
+#      via the local docker image cache after the first pull.
+#   C) built_image — opt-in. Either `ref` an already-published image (pull
+#      and scan, no build) OR `build_locally: true` to `docker build .` the
+#      cloned tree and scan the result. build_locally requires the docker
+#      socket mounted AND `SECURITY_SCAN_ALLOW_BUILD=1` in env (it executes
+#      the repo's RUN lines, breaking the otherwise-strict "never execute
+#      repo code" invariant for this opt-in mode only).
+image_scan:
+  base_images: true
+  built_image:
+    enabled: false
+    ref: null               # e.g. "leverj/ezel:latest"
+    build_locally: false    # opt-in; needs the docker socket + env guard
+  timeout: 600              # per `trivy image` call (seconds)
+
 paths:
   exclude:
     - "archive/"

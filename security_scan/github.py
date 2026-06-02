@@ -39,6 +39,7 @@ _CATEGORY_OPTIONS: list[tuple[str, str]] = [
     ("sast",       "YELLOW"),
     ("iac",        "GREEN"),
     ("license",    "BLUE"),
+    ("image",      "PINK"),
 ]
 
 
