@@ -133,7 +133,6 @@ read_version_from() {
 cmd_publish() {
   command -v docker >/dev/null || die "docker not on PATH"
 
-  local tag=""
   local push=1
   local multi_arch=1
   local repo="leverj/security-scan"
@@ -144,19 +143,20 @@ cmd_publish() {
       --single-arch)  multi_arch=0; shift ;;
       --repo)         repo="$2"; shift 2 ;;
       --repo=*)       repo="${1#--repo=}"; shift ;;
-      v[0-9]*|[0-9]*) tag="$1"; shift ;;
       -h|--help)
         cat <<EOH
-usage: ./security-scan.sh publish [vX.Y.Z] [--no-push] [--single-arch] [--repo <user/image>]
+usage: ./security-scan.sh publish [--no-push] [--single-arch] [--repo <user/image>]
 
-Build and push the docker image to Docker Hub. Assumes you've already run
-\`docker login\` in this shell (push uses the existing credentials).
+Build and push the docker image to Docker Hub as :latest. Assumes you've
+already run \`docker login\` in this shell (push uses the existing creds).
 
-  vX.Y.Z          override the tag. Default: derived from SECURITY-SCAN-MANIFEST.yaml
-                  (with a 'v' prefix). When omitted, the script verifies that
-                  pyproject.toml's version matches the manifest's.
+Only the :latest tag is published. Each push creates a new immutable digest
+that the consumer skill watches — versioned tags would just accumulate noise
+on Docker Hub. The version-for-humans label lives inside the image at
+/app/SECURITY-SCAN-MANIFEST.yaml (the script verifies pyproject.toml's
+version matches the manifest's before publishing).
 
-  --no-push       build + tag locally; do NOT push. Useful to dry-run a release.
+  --no-push       build only; do NOT push. Useful to dry-run a release.
   --single-arch   build only for the host architecture (skip multi-arch buildx).
                   Default: linux/amd64 + linux/arm64.
   --repo          override the image repo. Default: leverj/security-scan.
@@ -166,32 +166,26 @@ EOH
     esac
   done
 
-  # Resolve the tag.
-  if [[ -z "$tag" ]]; then
-    local py_version mf_version
-    py_version="$(read_version_from "$HERE/pyproject.toml" '^version\s*=')"
-    mf_version="$(read_version_from "$HERE/SECURITY-SCAN-MANIFEST.yaml" '^version:')"
-    if [[ -z "$py_version" || -z "$mf_version" ]]; then
-      die "could not read version from pyproject.toml or SECURITY-SCAN-MANIFEST.yaml"
-    fi
-    if [[ "$py_version" != "$mf_version" ]]; then
-      die "version mismatch — pyproject.toml: $py_version  vs  manifest: $mf_version. Align them, then re-run."
-    fi
-    tag="v$py_version"
-    echo "publish: resolved tag $tag from pyproject.toml + manifest"
-  else
-    echo "publish: using explicit tag $tag (skipping version-alignment check)"
+  # Version-alignment sanity check. We don't tag with the version anymore, but
+  # the version label inside the manifest must match pyproject.toml so the
+  # skill's upgrade prompt shows the right "X.Y.Z -> A.B.C" delta.
+  local py_version mf_version
+  py_version="$(read_version_from "$HERE/pyproject.toml" '^version\s*=')"
+  mf_version="$(read_version_from "$HERE/SECURITY-SCAN-MANIFEST.yaml" '^version:')"
+  if [[ -z "$py_version" || -z "$mf_version" ]]; then
+    die "could not read version from pyproject.toml or SECURITY-SCAN-MANIFEST.yaml"
   fi
+  if [[ "$py_version" != "$mf_version" ]]; then
+    die "version mismatch — pyproject.toml: $py_version  vs  manifest: $mf_version. Align them, then re-run."
+  fi
+  echo "publish: version=$py_version (label only; tag will be :latest)"
 
-  # Sanity: the version-stripped tag should match what's in the manifest if no override.
-  local image_versioned="$repo:$tag"
   local image_latest="$repo:latest"
 
   if (( multi_arch )); then
     if ! docker buildx version >/dev/null 2>&1; then
       die "docker buildx not available — pass --single-arch, or set up buildx (https://docs.docker.com/build/architecture/)"
     fi
-    # Ensure a builder that supports multi-platform exists / is current.
     local builder; builder="$(docker buildx inspect --bootstrap 2>/dev/null | grep -E '^Name:' | head -1 | awk '{print $2}')"
     echo "publish: using buildx builder: ${builder:-default}"
   fi
@@ -200,52 +194,49 @@ EOH
   (( multi_arch )) && plat_msg="linux/amd64,linux/arm64"
   (( push )) && push_msg="yes"
   echo
-  echo "  repo:      $repo"
-  echo "  tags:      $tag, latest"
+  echo "  image:     $image_latest"
+  echo "  version:   $py_version  (in manifest only; not a docker tag)"
   echo "  platforms: $plat_msg"
   echo "  push:      $push_msg"
   echo
 
   if (( push )); then
-    # Confirm a real publish.
-    read -r -p "publish $image_versioned + $image_latest to Docker Hub? [yes/no] " ans
+    read -r -p "publish $image_latest to Docker Hub? [yes/no] " ans
     [[ "$ans" == "yes" ]] || { echo "aborted."; return 1; }
   fi
 
   if (( multi_arch )); then
-    # `--load` doesn't support multi-arch (single-image local load only); for
-    # --no-push we just build to the buildx cache without exporting, which still
-    # exercises the full build and proves it would push cleanly.
-    #
-    # `--sbom=true` and `--provenance=mode=max` attach a CycloneDX SBOM and
-    # SLSA build provenance to the manifest list — these are what Docker Scout's
-    # "Missing supply chain attestation(s)" check looks for.
+    # `--load` doesn't support multi-arch; --no-push builds to the buildx cache
+    # only, which still exercises the full build and proves it would push.
+    # `--sbom=true` + `--provenance=mode=max` attach CycloneDX SBOM and SLSA
+    # build provenance — Docker Scout's "supply chain attestations" check.
     local export_args=()
     (( push )) && export_args=(--push)
     docker buildx build \
       --platform linux/amd64,linux/arm64 \
       --sbom=true \
       --provenance=mode=max \
-      -t "$image_versioned" \
       -t "$image_latest" \
       "${export_args[@]}" \
       "$HERE"
   else
-    docker build -t "$image_versioned" -t "$image_latest" "$HERE"
-    if (( push )); then
-      docker push "$image_versioned"
-      docker push "$image_latest"
-    fi
+    docker build -t "$image_latest" "$HERE"
+    (( push )) && docker push "$image_latest"
   fi
 
   echo
   if (( push )); then
-    echo "published: $image_versioned + $image_latest"
-    # Smoke-test the manifest is readable from the just-pushed tag.
+    echo "published: $image_latest  (version label: $py_version)"
+    # Smoke-test the manifest is readable from what we just pushed.
+    docker pull -q "$image_latest" >/dev/null 2>&1 || true
     echo "smoke test: extracting manifest from the pushed image..."
-    docker run --rm --entrypoint cat "$image_versioned" /app/SECURITY-SCAN-MANIFEST.yaml | head -5
+    docker run --rm --entrypoint cat "$image_latest" /app/SECURITY-SCAN-MANIFEST.yaml | head -5
+    # Surface the new digest so the user can verify the skill picks it up.
+    local digest
+    digest="$(docker buildx imagetools inspect "$image_latest" 2>/dev/null | grep -E '^Digest:' | head -1 | awk '{print $2}')"
+    [[ -n "$digest" ]] && echo "digest: $digest"
   else
-    echo "built locally (not pushed): $image_versioned + $image_latest"
+    echo "built locally (not pushed): $image_latest  (version label: $py_version)"
   fi
 }
 
@@ -517,9 +508,12 @@ usage:
                          [--dry-run|--no-dry-run]
                          [extra security-scan args...]
   ./security-scan.sh check
-  ./security-scan.sh publish [vX.Y.Z] [--no-push] [--single-arch] [--repo user/img]
-                         # builds + pushes multi-arch to Docker Hub.
+  ./security-scan.sh publish [--no-push] [--single-arch] [--repo user/img]
+                         # builds + pushes multi-arch to Docker Hub as :latest.
                          # Run \`docker login\` first; uses your existing creds.
+                         # Only :latest is published; the consumer skill watches
+                         # the image digest to detect new releases. Version-for-
+                         # humans label lives inside the manifest.
 
 defaults:
   --dry-run is added unless you pass --no-dry-run

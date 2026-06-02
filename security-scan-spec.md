@@ -430,18 +430,24 @@ reads as "all clear" to downstream tooling.
 ## 15. Image manifest contract
 
 The image bakes `SECURITY-SCAN-MANIFEST.yaml` at `/app/SECURITY-SCAN-MANIFEST.yaml`.
-Consumers read it without starting the scanner:
+Only the `:latest` tag is published on Docker Hub; each push gets a new
+immutable digest that consumers watch via the registry API. Consumers read
+the manifest without starting the scanner:
 
 ```bash
 docker run --rm --entrypoint cat \
-  leverj/security-scan:<tag> /app/SECURITY-SCAN-MANIFEST.yaml
+  leverj/security-scan:latest /app/SECURITY-SCAN-MANIFEST.yaml
 ```
+
+The `version` field inside the manifest is the human-readable identifier
+(shown to users in upgrade prompts). It is **not** mirrored as a docker tag —
+the tag is always `:latest`; identity is the digest.
 
 Top‑level keys:
 
 | Key | Purpose |
 |---|---|
-| `version` | Image version (matches `pyproject.toml` and the git tag). |
+| `version` | Image version (human-readable identifier; matches `pyproject.toml`). Surfaced in upgrade prompts. |
 | `config_schema_version` | Bumps only when the YAML schema changes in a breaking way. |
 | `docker_image` | Full repo name (`leverj/security-scan`) for use by consumers. |
 | `released` | Release date. |
@@ -452,10 +458,11 @@ Top‑level keys:
 | `config.removed_fields` | Fields the consumer should strip with confirmation. |
 | `image_paths` | Documentation of where things live inside the image (mount targets, source). |
 
-The publish workflow (`.github/workflows/publish.yml`) refuses to push unless
-`pyproject.toml`'s version and the manifest's version both match the git tag. This is
-the contract that lets the consumer skill in `leverj/ai-skills` evolve in lockstep
-with the image — schema migration is declared by the image, not coded into the skill.
+The `publish` subcommand of `security-scan.sh` refuses to push unless
+`pyproject.toml`'s version and the manifest's version match. This is the
+contract that lets the consumer skill in `leverj/ai-skills` evolve in lockstep
+with the image — schema migration is declared by the image, not coded into
+the skill.
 
 ---
 
@@ -463,14 +470,23 @@ with the image — schema migration is declared by the image, not coded into the
 
 1. Develop on a feature branch; CI lints + tests + does a no‑push docker build on each PR.
 2. Merge to `main`.
-3. Tag a release: `git tag v0.X.Y && git push origin v0.X.Y`.
-4. `publish.yml` builds multi‑arch (amd64 + arm64), tags `leverj/security-scan:vX.Y.Z`
-   + `:latest`, pushes to Docker Hub, and smoke‑tests the manifest is readable.
-5. The companion skill in `leverj/ai-skills` (or any other consumer) sees the new tag,
-   fetches the candidate manifest, surfaces the changelog + migrations to the user, and
-   applies them on confirmation.
+3. Run `./security-scan.sh publish` from your local shell (you must be
+   `docker login`'d). The script:
+   - Verifies `pyproject.toml`'s version matches the manifest's.
+   - Builds multi‑arch (amd64 + arm64) with `--sbom=true --provenance=mode=max`.
+   - Pushes ONLY `leverj/security-scan:latest`.
+   - Smoke‑tests the manifest is readable from the just‑pushed image and
+     prints the new digest.
+4. The companion skill in `leverj/ai-skills` (or any other consumer) sees
+   that `:latest` has a new digest (queried via Docker Hub's API or
+   `docker manifest inspect`), pulls the new image, fetches the candidate
+   manifest, surfaces the changelog + migrations to the user, and applies
+   them on confirmation.
 
-Required repository secrets for the publish job: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+We deliberately don't publish per‑version tags. Each push to `:latest`
+creates a new immutable digest; the digest is the identity. Rollbacks are
+done by pinning a specific digest in the consumer's state (the skill stores
+`pinned_digest` for exactly this purpose).
 
 ---
 
