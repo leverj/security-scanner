@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "security-scan"
-version = "0.3.0"
+version = "0.3.1"
 description = "Stateless single-repo security scanner; files findings into a GitHub Projects v2 board"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,6 +13,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Live Supabase Security Advisor lane (epic #4). Installed in the published
+# image so the in-container path works out of the box; pip-installable
+# locally via `pip install security-scan[live]`.
+live = [
+    "psycopg[binary]>=3.1",
+]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",

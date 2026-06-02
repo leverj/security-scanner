@@ -101,6 +101,41 @@ class ImageScanConfig:
 
 
 @dataclass
+class SupabaseConfig:
+    """Live Supabase Security Advisor lane (epic #4).
+
+    Off by default. When enabled, the scanner opens a read-only connection
+    to the project's Postgres and runs Supabase Studio's lint queries
+    against the live DB. Secrets resolve from env vars at runtime — never
+    on disk.
+
+    Two ways to provide credentials (use whichever your secrets pipeline
+    already supports):
+
+      1. `url_env`     — name of an env var holding a full DSN
+                         (`postgres://user:pass@host:port/db`). Takes precedence.
+      2. discrete envs — `host_env`, `db_env`, `user_env`, `password_env`,
+                         plus optional `port` and `sslmode`.
+
+    The recommended setup is a low-privilege read-only role:
+      CREATE ROLE security_scanner LOGIN PASSWORD '...';
+      GRANT pg_read_all_settings, pg_read_all_data TO security_scanner;
+    """
+    enabled: bool = False
+    url_env: str | None = None
+    host_env: str | None = None
+    db_env: str | None = None
+    user_env: str | None = None
+    password_env: str | None = None
+    port: int = 5432
+    sslmode: str = "require"
+    connect_timeout: int = 10
+    query_timeout_ms: int = 30_000
+    # Optional subset of lint check names (`supabase.<check>`) — None => all.
+    checks: list[str] | None = None
+
+
+@dataclass
 class PathsConfig:
     exclude: list[str] = field(default_factory=list)
 
@@ -172,6 +207,7 @@ class Config:
     gemma: GemmaScannerConfig = field(default_factory=GemmaScannerConfig)
     cross_validate: CrossValidateConfig = field(default_factory=CrossValidateConfig)
     image_scan: ImageScanConfig = field(default_factory=ImageScanConfig)
+    supabase: SupabaseConfig = field(default_factory=SupabaseConfig)
     # bundled defaults
     semgrep_rules_dir: str | None = None
 
@@ -274,6 +310,30 @@ def _from_dict(raw: dict) -> Config:
         docker_binary=str(img_raw.get("docker_binary") or "docker"),
     )
 
+    sb_raw = raw.get("supabase") or {}
+    sb_cfg = SupabaseConfig(
+        enabled=bool(sb_raw.get("enabled", False)),
+        url_env=(str(sb_raw.get("url_env")) if sb_raw.get("url_env") else None),
+        host_env=(str(sb_raw.get("host_env")) if sb_raw.get("host_env") else None),
+        db_env=(str(sb_raw.get("db_env")) if sb_raw.get("db_env") else None),
+        user_env=(str(sb_raw.get("user_env")) if sb_raw.get("user_env") else None),
+        password_env=(str(sb_raw.get("password_env")) if sb_raw.get("password_env") else None),
+        port=int(sb_raw.get("port") or 5432),
+        sslmode=str(sb_raw.get("sslmode") or "require"),
+        connect_timeout=int(sb_raw.get("connect_timeout") or 10),
+        query_timeout_ms=int(sb_raw.get("query_timeout_ms") or 30_000),
+        checks=(list(sb_raw.get("checks")) if sb_raw.get("checks") else None),
+    )
+    # Validate at load time: if enabled, the user must give us SOME way to
+    # connect. Don't fail on missing env vars yet — that's runtime concern.
+    if sb_cfg.enabled and not sb_cfg.url_env and not all(
+        [sb_cfg.host_env, sb_cfg.db_env, sb_cfg.user_env, sb_cfg.password_env]
+    ):
+        raise ConfigError(
+            "config: supabase.enabled=true but no credentials configured. "
+            "Set either `url_env` (DSN) OR all of host_env/db_env/user_env/password_env."
+        )
+
     paths_raw = raw.get("paths") or {}
     paths = PathsConfig(exclude=list(paths_raw.get("exclude") or []))
 
@@ -322,5 +382,6 @@ def _from_dict(raw: dict) -> Config:
         gemma=gemma_cfg,
         cross_validate=cv_cfg,
         image_scan=image_scan_cfg,
+        supabase=sb_cfg,
         semgrep_rules_dir=raw.get("semgrep_rules_dir"),
     )

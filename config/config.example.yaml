@@ -94,6 +94,35 @@ image_scan:
     build_locally: false    # opt-in; needs the docker socket + env guard
   timeout: 600              # per `trivy image` call (seconds)
 
+# Live Supabase Security Advisor (epic #4). Off by default. When enabled,
+# the scanner opens a READ-ONLY psycopg connection to the project's Postgres
+# and runs vendored Supabase advisor queries (RLS posture, SECURITY DEFINER
+# views, function search_path, role grants on unexpected schemas, etc.).
+#
+# Recommended: create a low-privilege read-only role in the project DB:
+#   CREATE ROLE security_scanner LOGIN PASSWORD '<your-pw>';
+#   GRANT pg_read_all_settings, pg_read_all_data TO security_scanner;
+#
+# Then provide credentials via env vars (NOT in this file):
+#   url_env       — name of env var holding a full DSN, OR
+#   host_env / db_env / user_env / password_env — discrete env vars
+#
+# 1Password users: add the env var names to .env.1password.tpl mapping
+# `op://<vault>/<item>/SUPABASE_DB_URL` etc.
+supabase:
+  enabled: false
+  url_env: "SUPABASE_DB_URL"
+  # OR:
+  # host_env: "SUPABASE_DB_HOST"
+  # db_env: "SUPABASE_DB_NAME"
+  # user_env: "SUPABASE_DB_USER"
+  # password_env: "SUPABASE_DB_PASSWORD"
+  port: 5432
+  sslmode: "require"
+  connect_timeout: 10
+  query_timeout_ms: 30000
+  # checks: ["supabase.rls_disabled_in_public", ...]   # subset; null = all
+
 paths:
   exclude:
     - "archive/"
