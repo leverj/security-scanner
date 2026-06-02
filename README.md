@@ -180,6 +180,23 @@ real binaries, run via `./security-scan.sh run`.
 
 ---
 
+## Publish a new image
+
+The image is published from your local machine — no CI secrets needed. Make
+sure you're logged in to Docker Hub first:
+
+```bash
+docker login                 # uses your Docker Hub credentials
+./security-scan.sh publish   # builds multi-arch, prompts, pushes
+```
+
+`publish` reads the version from `SECURITY-SCAN-MANIFEST.yaml`, verifies
+`pyproject.toml` matches, derives the tag (`v<version>`), and pushes
+`leverj/security-scan:v<version>` + `:latest` for amd64 + arm64. Pass an
+explicit tag to override (`./security-scan.sh publish v0.3.0-rc1`), or
+`--no-push` to do a release dry-run that builds locally without pushing.
+Run `./security-scan.sh publish --help` for the full set of flags.
+
 ## Use as a Claude Code skill
 
 The companion bundle at [`leverj/ai-skills`](https://github.com/leverj/ai-skills)
