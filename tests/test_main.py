@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, patch
 from secscan.config import (
     Config,
     PathsConfig,
+    ProjectConfig,
     ScannersConfig,
     SlackConfig,
     TriageConfig,
 )
+from secscan.github import ProjectContext, ProjectField
 from secscan.runners import RunnerResult
 
 
@@ -18,7 +20,7 @@ def _cfg(tmp_path, **kw):
     return Config(
         repo=kw.get("repo", "owner/name"),
         ref=kw.get("ref", "main"),
-        parent_issue=kw.get("parent_issue", 42),
+        project=kw.get("project", ProjectConfig(owner="owner", number=5)),
         github_token=kw.get("github_token", "ghp_fake"),
         scanners=kw.get("scanners", ScannersConfig(osv=True, gitleaks=True, semgrep=True)),
         paths=kw.get("paths", PathsConfig(exclude=[])),
@@ -26,6 +28,20 @@ def _cfg(tmp_path, **kw):
         triage=kw.get("triage", TriageConfig(enabled=False)),
         slack=kw.get("slack", SlackConfig(enabled=False)),
         semgrep_rules_dir=kw.get("semgrep_rules_dir", "auto"),
+    )
+
+
+def _project_ctx():
+    return ProjectContext(
+        id="PVT_x",
+        owner="owner",
+        number=5,
+        severity=ProjectField(id="SEV", options={
+            "critical": "o-c", "high": "o-h", "medium": "o-m", "low": "o-l", "info": "o-i",
+        }),
+        category=ProjectField(id="CAT", options={
+            "dependency": "o-d", "secret": "o-s", "sast": "o-a", "iac": "o-ia", "license": "o-li",
+        }),
     )
 
 
@@ -80,22 +96,37 @@ def _scanner_results():
     }
 
 
+def _fresh_gh(dry_run=False):
+    fake = MagicMock()
+    fake.dry_run = dry_run
+    fake.resolve_project.return_value = _project_ctx()
+    fake.list_project_items.return_value = []
+    fake.add_to_project.side_effect = lambda pid, nid: f"ITEM_{nid}"
+    fake.set_project_field.return_value = None
+    counter = {"n": 100}
+
+    def create(title, body, labels=None):
+        counter["n"] += 1
+        return {"number": counter["n"], "id": counter["n"] + 1000,
+                "node_id": f"I_{counter['n']}", "title": title, "body": body, "html_url": "x"}
+
+    fake.create_issue.side_effect = create
+    return fake
+
+
 def test_e2e_dry_run_creates_no_issues(tmp_path):
     from secscan.main import run
     repo_dir = tmp_path / "name"
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path)
-    fake_gh = MagicMock()
-    fake_gh.dry_run = True
-    fake_gh.list_subissues.return_value = []
+    fake_gh = _fresh_gh(dry_run=True)
 
     results = _scanner_results()
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=results["osv"]) as o, \
          patch("secscan.runners.gitleaks.run", return_value=results["gitleaks"]) as gl, \
          patch("secscan.runners.semgrep.run", return_value=results["semgrep"]) as sg:
-        # Don't actually clone — point repo_dir into place.
         fake_gh.clone.side_effect = _clone_populates(None)
         rc = run(cfg, dry_run=True, work_dir=str(tmp_path), keep_work=True)
 
@@ -103,9 +134,8 @@ def test_e2e_dry_run_creates_no_issues(tmp_path):
     o.assert_called()
     gl.assert_called()
     sg.assert_called()
-    # In dry-run: GitHub.create_issue is the dry-run path inside the real class;
-    # since we mocked GitHub entirely, we just check no real listing/posting tried beyond list_subissues.
-    fake_gh.list_subissues.assert_called_once_with(42)
+    fake_gh.resolve_project.assert_called_once_with("owner", 5)
+    fake_gh.list_project_items.assert_called_once()
 
 
 def test_e2e_creates_issues_when_not_dry_run(tmp_path):
@@ -114,16 +144,7 @@ def test_e2e_creates_issues_when_not_dry_run(tmp_path):
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path)
-    counter = {"n": 100}
-
-    def create(title, body, labels=None):
-        counter["n"] += 1
-        return {"number": counter["n"], "id": counter["n"] + 1000, "title": title, "body": body, "html_url": "x"}
-
-    fake_gh = MagicMock()
-    fake_gh.dry_run = False
-    fake_gh.list_subissues.return_value = []
-    fake_gh.create_issue.side_effect = create
+    fake_gh = _fresh_gh(dry_run=False)
 
     results = _scanner_results()
     with patch("secscan.main.GitHub", return_value=fake_gh), \
@@ -136,7 +157,9 @@ def test_e2e_creates_issues_when_not_dry_run(tmp_path):
     assert rc == 0
     # 1 OSV + 1 gitleaks + 1 semgrep finding -> 3 issues
     assert fake_gh.create_issue.call_count == 3
-    assert fake_gh.link_subissue.call_count == 3
+    assert fake_gh.add_to_project.call_count == 3
+    # Severity + Category for each = 6
+    assert fake_gh.set_project_field.call_count == 6
 
 
 def test_failed_scanner_does_not_block_others(tmp_path):
@@ -145,12 +168,8 @@ def test_failed_scanner_does_not_block_others(tmp_path):
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path)
-    fake_gh = MagicMock()
-    fake_gh.dry_run = False
-    fake_gh.list_subissues.return_value = []
-    fake_gh.create_issue.side_effect = lambda title, body, labels=None: {"number": 1, "id": 1001, "title": title, "body": body, "html_url": "x"}
+    fake_gh = _fresh_gh(dry_run=False)
 
-    # OSV fails; others succeed.
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=RunnerResult("osv", None, False, "binary not found")), \
          patch("secscan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
@@ -168,9 +187,7 @@ def test_all_scanners_fail_returns_error(tmp_path):
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path)
-    fake_gh = MagicMock()
-    fake_gh.dry_run = False
-    fake_gh.list_subissues.return_value = []
+    fake_gh = _fresh_gh(dry_run=False)
 
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=RunnerResult("osv", None, False, "x")), \
@@ -184,15 +201,11 @@ def test_all_scanners_fail_returns_error(tmp_path):
 
 
 def test_repo_dir_is_wiped_even_when_work_dir_provided(tmp_path):
-    """Security: the clone (with potential credentials in older code paths) must be
-    removed even when the caller supplied --work-dir (as the Docker entrypoint does)."""
+    """Security: the clone must be removed even when the caller supplied --work-dir."""
     from secscan.main import run
 
     cfg = _cfg(tmp_path)
-    fake_gh = MagicMock()
-    fake_gh.dry_run = False
-    fake_gh.list_subissues.return_value = []
-    fake_gh.create_issue.side_effect = lambda title, body, labels=None: {"number": 1, "id": 1001, "title": title, "body": body, "html_url": "x"}
+    fake_gh = _fresh_gh(dry_run=False)
 
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
@@ -202,9 +215,7 @@ def test_repo_dir_is_wiped_even_when_work_dir_provided(tmp_path):
         rc = run(cfg, dry_run=False, work_dir=str(tmp_path), keep_work=False)
 
     assert rc == 0
-    # repo_dir == work_dir / cfg.repo_name -> name
     assert not (tmp_path / "name").exists(), "clone dir must be wiped after the run"
-    # The provided work_dir itself is preserved.
     assert tmp_path.exists()
 
 
@@ -212,9 +223,7 @@ def test_keep_work_preserves_clone(tmp_path):
     from secscan.main import run
 
     cfg = _cfg(tmp_path)
-    fake_gh = MagicMock()
-    fake_gh.dry_run = True
-    fake_gh.list_subissues.return_value = []
+    fake_gh = _fresh_gh(dry_run=True)
 
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
@@ -232,10 +241,7 @@ def test_severity_floor_skips_low_findings(tmp_path):
     _populate_synthetic_repo(repo_dir)
 
     cfg = _cfg(tmp_path, severity_floor="critical")  # only critical
-    fake_gh = MagicMock()
-    fake_gh.dry_run = False
-    fake_gh.list_subissues.return_value = []
-    fake_gh.create_issue.side_effect = lambda title, body, labels=None: {"number": 1, "id": 1001, "title": title, "body": body, "html_url": "x"}
+    fake_gh = _fresh_gh(dry_run=False)
 
     with patch("secscan.main.GitHub", return_value=fake_gh), \
          patch("secscan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \

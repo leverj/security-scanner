@@ -13,7 +13,7 @@ def _f(sev):
 def test_disabled_slack_is_noop(monkeypatch):
     slack = SlackConfig(enabled=False)
     monkeypatch.setattr("secscan.notify.requests.post", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("called")))
-    assert post_digest(slack, [], SyncResult(), "o/n", "main", 1) is False
+    assert post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1) is False
 
 
 def test_webhook_called_with_text(monkeypatch):
@@ -21,7 +21,7 @@ def test_webhook_called_with_text(monkeypatch):
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
     resp = MagicMock(status_code=200)
     with patch("secscan.notify.requests.post", return_value=resp) as mp:
-        ok = post_digest(slack, [_f("high")], SyncResult(created=[{"number": 1}]), "o/n", "main", 42)
+        ok = post_digest(slack, [_f("high")], SyncResult(created=[{"number": 1}]), "o/n", "main", "owner", 42)
     assert ok is True
     args, kwargs = mp.call_args
     assert args[0] == "https://hooks.slack.test/x"
@@ -31,7 +31,7 @@ def test_webhook_called_with_text(monkeypatch):
 def test_webhook_missing_env_returns_false(monkeypatch, capsys):
     monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
-    assert post_digest(slack, [], SyncResult(), "o/n", "main", 1) is False
+    assert post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1) is False
 
 
 def test_chat_postmessage_used_when_channel_set(monkeypatch):
@@ -41,7 +41,7 @@ def test_chat_postmessage_used_when_channel_set(monkeypatch):
     resp = MagicMock(status_code=200)
     resp.json.return_value = {"ok": True}
     with patch("secscan.notify.requests.post", return_value=resp) as mp:
-        ok = post_digest(slack, [], SyncResult(), "o/n", "main", 1)
+        ok = post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1)
     assert ok is True
     assert mp.call_args.args[0] == "https://slack.com/api/chat.postMessage"
     assert mp.call_args.kwargs["headers"]["Authorization"] == "Bearer xoxb-fake"
@@ -52,7 +52,7 @@ def test_default_digest_includes_severity_breakdown():
     text = _default_digest(
         findings,
         SyncResult(created=[{}, {}], created_findings=findings[:2], skipped_dup=1),
-        "o/n", "main", 9,
+        "o/n", "main", "owner", 9,
     )
     # Severity totals reflect created (actionable) findings, not the input set.
     assert "high: 2" in text
@@ -63,7 +63,7 @@ def test_default_digest_includes_severity_breakdown():
 
 
 def test_default_digest_no_findings():
-    text = _default_digest([], SyncResult(), "o/n", "main", 9)
+    text = _default_digest([], SyncResult(), "o/n", "main", "owner", 9)
     assert "no findings" in text
     assert "filed 0" in text
 
@@ -75,7 +75,7 @@ def test_default_digest_all_dup_skipped_says_so():
     text = _default_digest(
         findings,
         SyncResult(created=[], created_findings=[], skipped_dup=2),
-        "o/n", "main", 9,
+        "o/n", "main", "owner", 9,
     )
     # Sections must NOT be present (the findings aren't actionable this run).
     assert ":test_tube:" not in text
@@ -90,7 +90,7 @@ def test_default_digest_below_floor_only_says_so():
     text = _default_digest(
         findings,
         SyncResult(created=[], created_findings=[], skipped_floor=1),
-        "o/n", "main", 9,
+        "o/n", "main", "owner", 9,
     )
     assert "no new findings to triage" in text
     assert "1 below severity floor" in text
@@ -110,7 +110,7 @@ def test_default_digest_groups_by_category():
     text = _default_digest(
         findings,
         SyncResult(created=findings, created_findings=findings),
-        "o/n", "main", 9,
+        "o/n", "main", "owner", 9,
     )
     assert "Dependencies" in text
     assert "Secrets (verified live)" in text
@@ -132,7 +132,7 @@ def test_one_liner_does_not_repeat_rule_id_when_package_extra_missing():
     )
     text = _default_digest(
         [f], SyncResult(created=[{}], created_findings=[f]),
-        "o/n", "main", 9,
+        "o/n", "main", "owner", 9,
     )
     # Should mention activesupport@7.2.3 derived from the message.
     assert "activesupport@7.2.3" in text
@@ -150,7 +150,7 @@ def test_default_digest_caps_per_section():
     text = _default_digest(
         findings,
         SyncResult(created=findings, created_findings=findings),
-        "o/n", "main", 9,
+        "o/n", "main", "owner", 9,
     )
     assert "and 5 more" in text
 
@@ -166,7 +166,7 @@ def test_intro_is_prepended_to_structured_digest(monkeypatch):
         post_digest(
             slack, actionable,
             SyncResult(created=[{"n": 1}, {"n": 2}], created_findings=actionable),
-            "o/n", "main", 9,
+            "o/n", "main", "owner", 9,
             intro="High-risk run: jwt@2.10.2 has an unpatched RCE",
         )
     sent = mp.call_args.kwargs["json"]["text"]
@@ -181,7 +181,8 @@ def test_digest_text_legacy_param_still_overrides(monkeypatch):
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
     resp = MagicMock(status_code=200)
     with patch("secscan.notify.requests.post", return_value=resp) as mp:
-        post_digest(slack, [_f("high")], SyncResult(), "o/n", "main", 9, digest_text="exact replacement")
+        post_digest(slack, [_f("high")], SyncResult(), "o/n", "main", "owner", 9,
+                    digest_text="exact replacement")
     assert mp.call_args.kwargs["json"]["text"] == "exact replacement"
 
 
@@ -190,5 +191,5 @@ def test_failure_is_non_blocking(monkeypatch):
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
     slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
     with patch("secscan.notify.requests.post", side_effect=requests.ConnectionError("down")):
-        ok = post_digest(slack, [], SyncResult(), "o/n", "main", 1)
+        ok = post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1)
     assert ok is False  # didn't raise

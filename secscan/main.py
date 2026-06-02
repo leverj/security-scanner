@@ -1,6 +1,6 @@
 """Orchestrator: config -> clone -> detect -> run -> normalize -> sync -> notify.
 
-Fail-fast on missing token / parent_issue (handled in config.load_config). A
+Fail-fast on missing token / project config (handled in config.load_config). A
 scanner that did NOT complete contributes ZERO findings — so a crashed scanner
 can never look like "all clear" to downstream tooling.
 """
@@ -27,7 +27,7 @@ from secscan.sync import SyncResult, sync
 def cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="secscan",
-        description="Stateless single-repo security scanner; files findings as GitHub sub-issues.",
+        description="Stateless single-repo security scanner; files findings into a GitHub Projects v2 board.",
     )
     parser.add_argument("--config", required=True, help="Path to config.yaml")
     parser.add_argument("--dry-run", action="store_true", help="Detect/scan/normalize but do not create any GitHub issues")
@@ -78,11 +78,44 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
                 file=sys.stderr,
             )
 
+        # Cross-validation: if both codex AND gemma ran, each tool reviews the other's
+        # findings. Strictly additive — bad reviews downgrade severity but never drop.
+        if (cfg.cross_validate.enabled
+                and "codex" in completed_scanners
+                and "gemma" in completed_scanners):
+            from secscan.cross_validate import cross_validate
+            before = sum(1 for f in findings if f.scanner in ("codex", "gemma"))
+            print(f"cross-validate: reviewing {before} LLM finding(s) bidirectionally", file=sys.stderr)
+            cross_validate(
+                findings,
+                repo_dir=repo_dir,
+                codex_enabled=True, gemma_enabled=True,
+                codex_binary=cfg.codex.binary, codex_model=cfg.codex.model,
+                codex_timeout=cfg.cross_validate.codex_timeout,
+                ollama_url=(cfg.gemma.base_url or cfg.triage.base_url),
+                gemma_model=(cfg.gemma.model or cfg.triage.model),
+                gemma_keep_alive=(cfg.gemma.keep_alive or cfg.triage.keep_alive),
+                gemma_timeout=cfg.cross_validate.gemma_timeout,
+            )
+
         triage = _maybe_triage(cfg)
 
+        # Resolve the Projects v2 target (and ensure Severity/Category fields exist).
+        # Fails fast with a clear message if the PAT lacks the 'project' scope or
+        # the project number is wrong.
+        project = gh.resolve_project(cfg.project.owner, cfg.project.number)
+        print(
+            f"project: {cfg.project.owner}/projects/{cfg.project.number} resolved",
+            file=sys.stderr,
+        )
+
         if dry_run:
-            print(f"DRY-RUN: would sync {len(findings)} findings against parent #{cfg.parent_issue}", file=sys.stderr)
-        result = sync(findings, gh, cfg.parent_issue, severity_floor=cfg.severity_floor, triage=triage)
+            print(
+                f"DRY-RUN: would sync {len(findings)} findings into "
+                f"{cfg.project.owner}/projects/{cfg.project.number}",
+                file=sys.stderr,
+            )
+        result = sync(findings, gh, project, severity_floor=cfg.severity_floor, triage=triage)
 
         # Slack digest (additive, never blocking). We hand it the ACTIONABLE
         # findings (the ones we actually filed); notify._default_digest also
@@ -90,14 +123,15 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         if cfg.slack.enabled:
             intro = (
                 triage.write_slack_intro(
-                    result.created_findings, result, cfg.repo, cfg.ref, cfg.parent_issue
+                    result.created_findings, result, cfg.repo, cfg.ref,
+                    cfg.project.owner, cfg.project.number,
                 )
                 if (triage and triage.enabled)
                 else None
             )
             post_digest(
                 cfg.slack, result.created_findings, result,
-                cfg.repo, cfg.ref, cfg.parent_issue, intro=intro,
+                cfg.repo, cfg.ref, cfg.project.owner, cfg.project.number, intro=intro,
             )
 
         _print_summary(result, completed_scanners, failed, dry_run)
@@ -177,6 +211,30 @@ def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules:
     if t.scanner == "syft":
         sbom_path = repo_dir.parent / f"sbom-{cfg.repo_name}.cyclonedx.json"
         return mod.run(repo_dir, output_path=sbom_path)
+    if t.scanner == "codex":
+        return mod.run(
+            repo_dir,
+            binary=cfg.codex.binary,
+            model=cfg.codex.model,
+            timeout=cfg.codex.timeout,
+        )
+    if t.scanner == "gemma":
+        # Fall back to triage's Ollama config when gemma-specific values are unset
+        # — most users only configure Ollama once.
+        base_url = cfg.gemma.base_url or cfg.triage.base_url
+        model = cfg.gemma.model or cfg.triage.model
+        keep_alive = cfg.gemma.keep_alive or cfg.triage.keep_alive
+        return mod.run(
+            repo_dir,
+            base_url=base_url,
+            model=model,
+            keep_alive=keep_alive,
+            timeout=cfg.gemma.timeout,
+            max_files=cfg.gemma.max_files,
+            max_file_bytes=cfg.gemma.max_file_bytes,
+            max_total_bytes=cfg.gemma.max_total_bytes,
+            exclude=cfg.paths.exclude,
+        )
     return RunnerResult(t.scanner, None, False, f"unknown scanner: {t.scanner}")
 
 

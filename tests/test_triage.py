@@ -63,7 +63,7 @@ def test_intro_skipped_when_intro_disabled():
     from secscan.sync import SyncResult
     t = Triage(TriageConfig(enabled=True, intro_enabled=False, prewarm=False))
     with patch.object(t._session, "post") as p:
-        text = t.write_slack_intro([_f()], SyncResult(), "o/n", "main", 9)
+        text = t.write_slack_intro([_f()], SyncResult(), "o/n", "main", "owner", 9)
     assert text is None
     p.assert_not_called()
 
@@ -144,7 +144,7 @@ def test_slack_digest_returns_text():
     t = Triage(TriageConfig(enabled=True, prewarm=False))
     with patch.object(t._session, "get", return_value=_reachable_response()), \
          patch.object(t._session, "post", return_value=_gemma_response("Hello digest")):
-        text = t.write_slack_digest([_f()], SyncResult(created=[{"n": 1}]), "o/n", "main", 42)
+        text = t.write_slack_digest([_f()], SyncResult(created=[{"n": 1}]), "o/n", "main", "owner", 42)
     assert text == "Hello digest"
 
 

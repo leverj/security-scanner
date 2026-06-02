@@ -4,24 +4,26 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 Stateless single-repo security scanner. Detects a repo's stack, runs OSV-Scanner +
-Gitleaks + Semgrep, and files each finding as a deduplicated GitHub sub-issue under
-a user-provided parent issue.
+Gitleaks + Semgrep + Trivy + Trufflehog, and files each finding as a deduplicated
+issue into a user-provided GitHub Projects v2 board.
 
-State lives in GitHub Issues. No internal database. Closing/fixing findings is out
-of scope — another system owns that.
+State lives in GitHub Issues + their project membership. No internal database.
+Closing/fixing findings is out of scope — another system owns that.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Create the PARENT issue on your target GitHub repo and note its number.
-#    secscan files findings as sub-issues of THIS issue — it does not create the
-#    parent for you. Title it something like "Security findings (secscan)".
+# 1. Create (or pick) a GitHub Projects v2 board for security findings.
+#    Note its number (visible in the URL: /projects/<number>).
+#    On first run secscan provisions two single-select fields on the board:
+#      - Severity   (critical, high, medium, low, info)
+#      - Category   (dependency, secret, sast, iac, license)
 
 # 2. Copy the example config
 cp config.example.yaml config.yaml
-$EDITOR config.yaml          # set repo, ref, parent_issue (= the number from step 1)
+$EDITOR config.yaml          # set repo, ref, project.owner, project.number
 
 # 3. Set up secrets — pick ONE of the two paths in the next section
 
@@ -57,8 +59,10 @@ secrets:
 ```
 
 ```bash
-# Create a fine-grained PAT at https://github.com/settings/tokens
-#   Scope: `repo` (full) — required to create issues + sub-issues on the target repo
+# Create a PAT at https://github.com/settings/tokens (classic; fine-grained
+# doesn't expose Projects v2 mutations as of late 2025).
+#   Scopes: `repo` (full) — to create + read issues on the target repo
+#           `project`     — to read/write the Projects v2 board (add items, set fields)
 export GITHUB_TOKEN=github_pat_...
 
 # Optional Slack — get a webhook from https://api.slack.com/apps
@@ -121,8 +125,9 @@ direct `docker run`) will pick it up.
 
 Each finding gets a deterministic fingerprint (`rule_id + file_path + normalized
 snippet`, line-number-free) that is embedded as an HTML comment in the issue body.
-On the next run, sub-issues of the parent (open AND closed) are listed, fingerprints
-parsed back out, and any new finding whose fingerprint is already present is skipped.
+On the next run, all items in the target Projects v2 board (open AND closed) are
+listed, fingerprints parsed back out, and any new finding whose fingerprint is
+already present is skipped.
 
 This means: once an issue is closed (fixed OR won't-fix), it never refiles. If you
 need re-surfacing of regressions, that's the external fixing system's concern.

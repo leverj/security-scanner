@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from secscan.github import GitHub, GitHubError
+from secscan.github import GitHub, GitHubError, ProjectField
 
 TOKEN = "ghp_supersecrettoken_abcdef123456"
 
@@ -58,7 +58,6 @@ def test_clone_url_has_no_credentials(tmp_path):
     with patch("secscan.github.subprocess.run", return_value=completed) as m:
         gh.clone("dev", tmp_path / "repo")
     args = m.call_args.args[0]
-    # The URL is the last-or-second-to-last arg; check no element contains the token URL form.
     url = next(a for a in args if a.startswith("https://"))
     assert url == "https://github.com/leverj/ezel.git"
     assert TOKEN not in url
@@ -66,9 +65,6 @@ def test_clone_url_has_no_credentials(tmp_path):
 
 
 def test_clone_passes_token_via_one_shot_config(tmp_path):
-    """The token must arrive via `-c http.<url>.extraheader=AUTHORIZATION: basic <b64>`,
-    which is process-scoped and not written into .git/config. (Basic, not Bearer:
-    GitHub's smart-HTTP wants Basic for git operations.)"""
     import base64
 
     gh = _gh()
@@ -76,17 +72,14 @@ def test_clone_passes_token_via_one_shot_config(tmp_path):
     with patch("secscan.github.subprocess.run", return_value=completed) as m:
         gh.clone("dev", tmp_path / "repo")
     args = m.call_args.args[0]
-    # -c <key=val> appears as two consecutive list entries.
     assert "-c" in args
     c_idx = args.index("-c")
     extraheader = args[c_idx + 1]
     assert "extraheader" in extraheader
     assert "basic " in extraheader.lower()
-    # The base64-encoded credential must be present and decode back to x-access-token:TOKEN
     encoded = extraheader.split("basic ", 1)[-1]
     decoded = base64.b64decode(encoded).decode()
     assert decoded == f"x-access-token:{TOKEN}"
-    # And the raw token must NOT appear unencoded anywhere on argv (only its base64 form is OK).
     for a in args:
         assert TOKEN not in a, f"raw token leaked into argv: {a!r}"
 
@@ -101,49 +94,12 @@ def test_clone_scrubs_token_from_error(tmp_path):
     assert TOKEN not in str(ei.value)
 
 
-# ---- list_subissues -------------------------------------------------------
-
-
-def test_list_subissues_paginates():
-    gh = _gh()
-    page1 = _resp(
-        200,
-        json_body=[{"number": 1, "state": "open", "body": "", "title": "a", "html_url": "u1"}],
-        headers={"Link": '<https://api.github.com/page2>; rel="next", <https://api.github.com/last>; rel="last"'},
-    )
-    page2 = _resp(
-        200,
-        json_body=[{"number": 2, "state": "closed", "body": "", "title": "b", "html_url": "u2"}],
-        headers={},
-    )
-    with patch.object(requests.Session, "request", side_effect=[page1, page2]) as m:
-        out = gh.list_subissues(451)
-    assert [i["number"] for i in out] == [1, 2]
-    assert m.call_count == 2
-    # second call uses the next URL verbatim
-    second_url = m.call_args_list[1].args[1] if len(m.call_args_list[1].args) >= 2 else m.call_args_list[1].kwargs["url"]
-    assert second_url == "https://api.github.com/page2"
-
-
-def test_list_subissues_returns_open_and_closed():
-    gh = _gh()
-    body = [
-        {"number": 1, "state": "open", "body": "", "title": "a", "html_url": "u1"},
-        {"number": 2, "state": "closed", "body": "", "title": "b", "html_url": "u2"},
-    ]
-    resp = _resp(200, json_body=body, headers={})
-    with patch.object(requests.Session, "request", return_value=resp):
-        out = gh.list_subissues(451)
-    states = {i["state"] for i in out}
-    assert states == {"open", "closed"}
-
-
 # ---- create_issue ---------------------------------------------------------
 
 
 def test_create_issue_posts_correct_payload():
     gh = _gh()
-    created = {"id": 9001, "number": 42, "title": "t", "body": "b", "html_url": "u", "state": "open"}
+    created = {"id": 9001, "node_id": "I_xxx", "number": 42, "title": "t", "body": "b", "html_url": "u", "state": "open"}
     resp = _resp(201, json_body=created, headers={})
     with patch.object(requests.Session, "request", return_value=resp) as m:
         out = gh.create_issue("t", "b", labels=["security", "secscan"])
@@ -154,7 +110,6 @@ def test_create_issue_posts_correct_payload():
     assert method == "POST"
     assert url == "https://api.github.com/repos/leverj/ezel/issues"
     assert call.kwargs["json"] == {"title": "t", "body": "b", "labels": ["security", "secscan"]}
-    # auth header is set on the session
     assert gh.session.headers["Authorization"] == f"Bearer {TOKEN}"
     assert gh.session.headers["Accept"] == "application/vnd.github+json"
     assert gh.session.headers["X-GitHub-Api-Version"] == "2022-11-28"
@@ -162,14 +117,15 @@ def test_create_issue_posts_correct_payload():
 
 def test_create_issue_defaults_security_label():
     gh = _gh()
-    created = {"id": 1, "number": 1, "title": "t", "body": "b", "html_url": "u", "state": "open"}
+    created = {"id": 1, "node_id": "I_x", "number": 1, "title": "t", "body": "b", "html_url": "u", "state": "open"}
     resp = _resp(201, json_body=created)
     with patch.object(requests.Session, "request", return_value=resp) as m:
         gh.create_issue("t", "b")
     assert m.call_args.kwargs["json"]["labels"] == ["security"]
 
 
-def test_create_issue_dry_run(capsys):
+def test_create_issue_dry_run_includes_node_id(capsys):
+    """Dry-run must return a node_id so the downstream project flow doesn't KeyError."""
     gh = _gh(dry_run=True)
     with patch.object(requests.Session, "request") as m:
         out = gh.create_issue("hello", "body")
@@ -177,46 +133,230 @@ def test_create_issue_dry_run(capsys):
     assert out["number"] == 0
     assert out["title"] == "hello"
     assert out["html_url"] == "<dry-run>"
+    assert "node_id" in out and out["node_id"]
     err = capsys.readouterr().err
     assert "DRY-RUN" in err and "hello" in err
 
 
-# ---- link_subissue --------------------------------------------------------
+# ---- resolve_project (GraphQL) -------------------------------------------
 
 
-def test_link_subissue_uses_id_not_number():
+def _graphql_resp(data: dict | None = None, errors: list | None = None):
+    body = {"data": data or {}}
+    if errors is not None:
+        body["errors"] = errors
+    return _resp(200, json_body=body)
+
+
+def test_resolve_project_org_match_returns_context():
     gh = _gh()
-    child = {"id": 12345, "number": 7, "title": "x", "body": "", "html_url": "u", "state": "open"}
-    resp = _resp(201, json_body={})
-    with patch.object(requests.Session, "request", return_value=resp) as m:
-        gh.link_subissue(451, child)
-    call = m.call_args
-    url = call.args[1] if len(call.args) > 1 else call.kwargs["url"]
-    assert url == "https://api.github.com/repos/leverj/ezel/issues/451/sub_issues"
-    assert call.kwargs["json"] == {"sub_issue_id": 12345}
+    proj = {
+        "id": "PVT_xxx",
+        "fields": {"nodes": [
+            {"__typename": "ProjectV2SingleSelectField", "id": "SEV", "name": "Severity",
+             "options": [{"id": "o-crit", "name": "critical"}, {"id": "o-high", "name": "high"},
+                         {"id": "o-med",  "name": "medium"},   {"id": "o-low",  "name": "low"},
+                         {"id": "o-info", "name": "info"}]},
+            {"__typename": "ProjectV2SingleSelectField", "id": "CAT", "name": "Category",
+             "options": [{"id": "o-dep",  "name": "dependency"}, {"id": "o-sec",  "name": "secret"},
+                         {"id": "o-sast", "name": "sast"},       {"id": "o-iac",  "name": "iac"},
+                         {"id": "o-lic",  "name": "license"}]},
+        ]},
+    }
+    resp = _graphql_resp({"organization": {"projectV2": proj}, "user": None})
+    with patch.object(requests.Session, "request", return_value=resp):
+        ctx = gh.resolve_project("leverj", 5)
+    assert ctx.id == "PVT_xxx"
+    assert ctx.owner == "leverj" and ctx.number == 5
+    assert ctx.severity.id == "SEV"
+    assert ctx.category.id == "CAT"
+    assert ctx.severity.options["critical"] == "o-crit"
+    assert ctx.category.options["sast"] == "o-sast"
 
 
-def test_link_subissue_dry_run(capsys):
+def test_resolve_project_user_match_falls_through():
+    gh = _gh()
+    proj = {"id": "PVT_user", "fields": {"nodes": [
+        {"__typename": "ProjectV2SingleSelectField", "id": "SEV", "name": "Severity",
+         "options": [{"id": "o-c", "name": "critical"}, {"id": "o-h", "name": "high"},
+                     {"id": "o-m", "name": "medium"},   {"id": "o-l", "name": "low"},
+                     {"id": "o-i", "name": "info"}]},
+        {"__typename": "ProjectV2SingleSelectField", "id": "CAT", "name": "Category",
+         "options": [{"id": "o-d", "name": "dependency"}, {"id": "o-s", "name": "secret"},
+                     {"id": "o-a", "name": "sast"},       {"id": "o-ia", "name": "iac"},
+                     {"id": "o-li", "name": "license"}]},
+    ]}}
+    resp = _graphql_resp({"organization": {"projectV2": None}, "user": {"projectV2": proj}})
+    with patch.object(requests.Session, "request", return_value=resp):
+        ctx = gh.resolve_project("alice", 2)
+    assert ctx.id == "PVT_user"
+
+
+def test_resolve_project_not_found_raises_404():
+    gh = _gh()
+    resp = _graphql_resp({"organization": None, "user": None})
+    with patch.object(requests.Session, "request", return_value=resp):
+        with pytest.raises(GitHubError) as ei:
+            gh.resolve_project("nope", 99)
+    assert ei.value.status == 404
+    assert "project" in str(ei.value).lower()
+
+
+def test_resolve_project_creates_missing_fields():
+    """If Severity / Category don't already exist, they are created (one mutation each).
+    The resolve query plus two create mutations = 3 HTTP calls total."""
+    gh = _gh()
+    # First call: lookup returns project with NO custom fields.
+    lookup = _graphql_resp({"organization": {"projectV2": {"id": "PVT_x", "fields": {"nodes": []}}}, "user": None})
+    # Two creates — return synthetic created field structures.
+    created_sev = _graphql_resp({"createProjectV2Field": {"projectV2Field": {
+        "id": "SEV_NEW", "options": [
+            {"id": "o-c", "name": "critical"}, {"id": "o-h", "name": "high"},
+            {"id": "o-m", "name": "medium"},   {"id": "o-l", "name": "low"},
+            {"id": "o-i", "name": "info"},
+        ],
+    }}})
+    created_cat = _graphql_resp({"createProjectV2Field": {"projectV2Field": {
+        "id": "CAT_NEW", "options": [
+            {"id": "o-d", "name": "dependency"}, {"id": "o-s", "name": "secret"},
+            {"id": "o-a", "name": "sast"},       {"id": "o-ia", "name": "iac"},
+            {"id": "o-li", "name": "license"},
+        ],
+    }}})
+    with patch.object(requests.Session, "request", side_effect=[lookup, created_sev, created_cat]) as m:
+        ctx = gh.resolve_project("leverj", 5)
+    assert m.call_count == 3
+    assert ctx.severity.id == "SEV_NEW"
+    assert ctx.category.id == "CAT_NEW"
+    # All three must POST to /graphql
+    for call in m.call_args_list:
+        url = call.args[1] if len(call.args) > 1 else call.kwargs.get("url")
+        assert url == "https://api.github.com/graphql"
+
+
+def test_resolve_project_dry_run_skips_network():
     gh = _gh(dry_run=True)
-    child = {"id": 12345, "number": 7}
     with patch.object(requests.Session, "request") as m:
-        gh.link_subissue(451, child)
+        ctx = gh.resolve_project("leverj", 5)
     assert m.call_count == 0
-    err = capsys.readouterr().err
-    assert "DRY-RUN" in err and "#7" in err and "#451" in err
+    assert ctx.id == "DRY_RUN_PROJECT"
+    assert "critical" in ctx.severity.options
+    assert "sast" in ctx.category.options
 
 
-# ---- retry / rate limit / errors -----------------------------------------
+# ---- list_project_items --------------------------------------------------
+
+
+def test_list_project_items_paginates_and_skips_non_issues():
+    gh = _gh()
+    page1 = _graphql_resp({"node": {"items": {
+        "pageInfo": {"hasNextPage": True, "endCursor": "cur1"},
+        "nodes": [
+            {"id": "ITEM1", "content": {"id": "I1", "number": 11, "state": "OPEN", "title": "t1", "body": "b1"}},
+            {"id": "ITEM_DRAFT", "content": {}},  # draft — no number, must skip
+        ],
+    }}})
+    page2 = _graphql_resp({"node": {"items": {
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "nodes": [
+            {"id": "ITEM2", "content": {"id": "I2", "number": 12, "state": "CLOSED", "title": "t2", "body": "b2"}},
+        ],
+    }}})
+    with patch.object(requests.Session, "request", side_effect=[page1, page2]) as m:
+        out = gh.list_project_items("PVT_x")
+    assert [it["number"] for it in out] == [11, 12]
+    assert m.call_count == 2
+    assert out[0]["item_id"] == "ITEM1" and out[1]["item_id"] == "ITEM2"
+    assert out[0]["body"] == "b1"
+
+
+def test_list_project_items_dry_run_returns_empty():
+    gh = _gh(dry_run=True)
+    with patch.object(requests.Session, "request") as m:
+        out = gh.list_project_items("PVT_x")
+    assert out == []
+    assert m.call_count == 0
+
+
+# ---- add_to_project / set_project_field ----------------------------------
+
+
+def test_add_to_project_returns_item_id():
+    gh = _gh()
+    resp = _graphql_resp({"addProjectV2ItemById": {"item": {"id": "NEW_ITEM"}}})
+    with patch.object(requests.Session, "request", return_value=resp) as m:
+        out = gh.add_to_project("PVT_x", "I_node")
+    assert out == "NEW_ITEM"
+    call = m.call_args
+    assert (call.args[1] if len(call.args) > 1 else call.kwargs["url"]) == "https://api.github.com/graphql"
+    assert "addProjectV2ItemById" in call.kwargs["json"]["query"]
+    assert call.kwargs["json"]["variables"] == {"pid": "PVT_x", "cid": "I_node"}
+
+
+def test_add_to_project_dry_run_returns_synthetic_id():
+    gh = _gh(dry_run=True)
+    with patch.object(requests.Session, "request") as m:
+        out = gh.add_to_project("PVT_x", "I_node")
+    assert out.startswith("DRY_RUN_ITEM_")
+    assert m.call_count == 0
+
+
+def test_set_project_field_calls_update_mutation():
+    gh = _gh()
+    resp = _graphql_resp({"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "ITEM"}}})
+    field = ProjectField(id="FID", options={"critical": "o-crit", "high": "o-high"})
+    with patch.object(requests.Session, "request", return_value=resp) as m:
+        gh.set_project_field("PVT_x", "ITEM", field, "critical")
+    assert m.call_count == 1
+    call = m.call_args
+    assert "updateProjectV2ItemFieldValue" in call.kwargs["json"]["query"]
+    vars_ = call.kwargs["json"]["variables"]
+    assert vars_["pid"] == "PVT_x"
+    assert vars_["iid"] == "ITEM"
+    assert vars_["fid"] == "FID"
+    assert vars_["oid"] == "o-crit"
+
+
+def test_set_project_field_unknown_option_is_noop():
+    """If the user renamed an option, secscan must not crash — silently skip."""
+    gh = _gh()
+    field = ProjectField(id="FID", options={"critical": "o-crit"})
+    with patch.object(requests.Session, "request") as m:
+        gh.set_project_field("PVT_x", "ITEM", field, "this-option-does-not-exist")
+    assert m.call_count == 0
+
+
+def test_set_project_field_dry_run_is_noop():
+    gh = _gh(dry_run=True)
+    field = ProjectField(id="FID", options={"critical": "o-crit"})
+    with patch.object(requests.Session, "request") as m:
+        gh.set_project_field("PVT_x", "ITEM", field, "critical")
+    assert m.call_count == 0
+
+
+# ---- _graphql error surface ---------------------------------------------
+
+
+def test_graphql_errors_raise_with_scrubbed_message():
+    gh = _gh()
+    leaky = {"message": f"bad token {TOKEN}"}
+    resp = _graphql_resp(errors=[leaky])
+    with patch.object(requests.Session, "request", return_value=resp):
+        with pytest.raises(GitHubError) as ei:
+            gh._graphql("query { foo }")
+    assert TOKEN not in str(ei.value)
+
+
+# ---- retry / rate limit / errors ----------------------------------------
 
 
 def test_retry_on_500():
     gh = _gh()
     bad = _resp(500, json_body={"message": "boom"})
-    good = _resp(200, json_body=[])
+    good = _resp(201, json_body={"id": 1, "node_id": "I_x", "number": 1, "title": "t", "body": "b", "html_url": "u", "state": "open"})
     with patch("secscan.github.time.sleep") as sl, \
          patch.object(requests.Session, "request", side_effect=[bad, good]) as m:
-        out = gh.list_subissues(451)
-    assert out == []
+        gh.create_issue("t", "b")
     assert m.call_count == 2
     assert sl.call_count >= 1
 
@@ -230,21 +370,19 @@ def test_rate_limit_waits_and_retries():
         json_body={"message": "API rate limit exceeded"},
         headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(reset_at)},
     )
-    good = _resp(200, json_body=[])
+    good = _resp(201, json_body={"id": 1, "node_id": "I_x", "number": 1, "title": "t", "body": "b", "html_url": "u", "state": "open"})
     with patch("secscan.github.time.sleep") as sl, \
          patch.object(requests.Session, "request", side_effect=[limited, good]) as m:
-        out = gh.list_subissues(451)
-    assert out == []
+        gh.create_issue("t", "b")
     assert m.call_count == 2
-    assert sl.call_count == 1  # exactly one wait, then one retry
+    assert sl.call_count == 1
 
 
 def test_4xx_raises_githuberror_without_token():
     gh = _gh()
-    # Embed the token in the error message to make sure it gets scrubbed.
     resp = _resp(401, json_body={"message": f"bad creds {TOKEN}"})
     with patch.object(requests.Session, "request", return_value=resp):
         with pytest.raises(GitHubError) as ei:
-            gh.list_subissues(451)
+            gh.create_issue("t", "b")
     assert ei.value.status == 401
     assert TOKEN not in str(ei.value)

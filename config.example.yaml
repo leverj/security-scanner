@@ -7,7 +7,17 @@
 
 repo: "leverj/ezel"
 ref: "dev"
-parent_issue: 451
+
+# Target a GitHub Projects v2 board. Findings file as flat items here — no
+# parent epic / sub-issue relationship. The board's URL is
+# https://github.com/orgs/<owner>/projects/<number>  (or /users/<owner>/...).
+# secscan idempotently provisions two single-select fields on first run:
+#   - Severity   (critical, high, medium, low, info)
+#   - Category   (dependency, secret, sast, iac, license)
+# PAT must have BOTH `repo` and `project` scopes.
+project:
+  owner: "leverj"
+  number: 5
 github_token_env: "GITHUB_TOKEN"
 
 # How ./secscan.sh sources the env vars named in *_env keys above.
@@ -28,8 +38,41 @@ scanners:
   semgrep: true
   # Comprehensive supply chain: vuln + secret + IaC + license, all in one binary.
   trivy: true
-  # SBOM artifact (CycloneDX JSON written to /work). Files no sub-issues.
+  # SBOM artifact (CycloneDX JSON written to /work). Doesn't file project items.
   syft: true
+  # LLM-driven SAST. Both OFF by default — they cost external compute and
+  # tend to be noisier than the deterministic scanners. Enable for depth.
+  # When BOTH are enabled, each tool reviews the other's findings (see
+  # `cross_validate` below); disagreements downgrade severity but never drop.
+  codex: false              # OpenAI Codex via local `codex` CLI (uses your subscription)
+  gemma: false              # Local Gemma 4 via Ollama
+
+# Codex CLI tunables. Auth is via `codex login` outside this tool; secscan
+# never sees an API key. The CLI must be on PATH.
+codex:
+  binary: "codex"
+  # model: "gpt-5-codex"    # omit to use codex's configured default
+  timeout: 1200             # seconds; LLM scans run minutes on large repos
+
+# Gemma scanner tunables. Reuses the Ollama URL/model from `triage` by default
+# — leave these blank unless you want a different setup for primary SAST.
+gemma:
+  # base_url: "http://host.docker.internal:11434"
+  # model: "gemma4:26b"
+  # keep_alive: "5m"
+  timeout: 1800
+  max_files: 60             # max source files in one prompt batch
+  max_file_bytes: 12000     # per-file content cap (truncated past this)
+  max_total_bytes: 200000   # total prompt cap across all files
+
+# Cross-validation: each LLM scanner reviews the OTHER's findings. Only
+# active when both `scanners.codex` and `scanners.gemma` are true. False
+# positives flagged by the validator get a one-notch severity downgrade
+# (critical is asymmetric — it never auto-downgrades).
+cross_validate:
+  enabled: true
+  codex_timeout: 300        # per-finding budget when codex reviews a gemma flag
+  gemma_timeout: 180        # per-finding budget when gemma reviews a codex flag
 
 paths:
   exclude:

@@ -13,7 +13,13 @@ from fnmatch import fnmatchcase
 
 from secscan.models import Finding, normalize_severity
 
-_CATEGORY = {"osv": "dependency", "gitleaks": "secret", "semgrep": "sast"}
+_CATEGORY = {
+    "osv": "dependency",
+    "gitleaks": "secret",
+    "semgrep": "sast",
+    "codex": "sast",
+    "gemma": "sast",
+}
 
 
 def normalize_sarif(sarif: dict, scanner: str, exclude: list[str] | None = None) -> list[Finding]:
