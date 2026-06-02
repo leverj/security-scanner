@@ -180,33 +180,23 @@ real binaries, run via `./secscan.sh run`.
 
 ---
 
-## Claude Code skill
+## Use as a Claude Code skill
 
-This repo ships a [Claude Code](https://claude.com/claude-code) skill at
-[`skill/`](skill/). It lets the agent drive secscan for you ("scan this repo
-for security issues", "/secscan", etc.).
+The companion bundle at [`leverj/ai-skills`](https://github.com/leverj/ai-skills)
+ships a `secscan` skill that drives this image directly:
 
-Install once:
-
-```bash
-git clone https://github.com/leverj/security-scanner.git ~/code/security-scanner
-echo 'export SECSCAN_HOME=~/code/security-scanner' >> ~/.zshrc   # or .bashrc
-source ~/.zshrc
-
-~/code/security-scanner/skill/install.sh   # copies skill to ~/.claude/skills/secscan/
+```
+/plugin marketplace add leverj/ai-skills
+/plugin install leverj@leverj-ai-skills
+# then: /leverj:secscan run
 ```
 
-The skill bundle contains:
-
-- `skill/SKILL.md` — what the agent sees: when to invoke, operating procedure, hard rules.
-- `skill/references/README.md` — high-level reference.
-- `skill/references/CONFIG.md` — full config schema + 1Password walkthrough.
-- `skill/references/RUN.md` — runbook, flags, exit codes, failure recovery.
-
-The scanner repo stays the single source of truth — the skill is just
-instructions pointing at `$SECSCAN_HOME`. Update secscan by `git pull`-ing
-in `$SECSCAN_HOME`; no need to re-run `install.sh` unless the skill
-content itself changes.
+The skill pulls and runs the published Docker image
+`leverj/security-scan:<tag>`, bind-mounts your `config/` directory at
+`/config:ro`, and offers a user-confirmed upgrade flow when a newer image
+version is available (the image ships a `SECSCAN-MANIFEST.yaml` describing
+its version + any config fields the skill should add to your local
+`config.yaml`).
 
 ## Spec
 

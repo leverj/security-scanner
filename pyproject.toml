@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secscan"
-version = "0.1.0"
-description = "Stateless single-repo security scanner that files findings as GitHub sub-issues"
+version = "0.2.0"
+description = "Stateless single-repo security scanner; files findings into a GitHub Projects v2 board"
 requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0",

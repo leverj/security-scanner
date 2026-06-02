@@ -114,6 +114,10 @@ WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY secscan /app/secscan
 COPY README.md /app/README.md
+# Manifest the consuming skill reads to see version + needed config migrations.
+# Pull it out without starting the scanner:
+#   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECSCAN-MANIFEST.yaml
+COPY SECSCAN-MANIFEST.yaml /app/SECSCAN-MANIFEST.yaml
 RUN pip install --no-cache-dir /app
 
 # Make sure the mount points exist (no VOLUME directive — keeps `--rm` from
