@@ -52,9 +52,32 @@ _FROM_RE = re.compile(
 )
 
 # Heuristic for "this looks like a real image ref, not a stage alias":
-# at least one of `:`, `/`, `@sha256` must appear, OR it's a well-known base
-# (alpine, ubuntu, debian, etc.). We're conservative — if in doubt, skip.
+# either a registry-shape character (`:`, `/`, `@`) is present, OR it's a
+# known short base name (alpine, ubuntu, debian, etc.). Without the
+# whitelist, `FROM alpine` and `FROM nginx` were being silently dropped as
+# if they were stage aliases.
 _LOOKS_LIKE_IMAGE_RE = re.compile(r"[/:@]")
+_WELL_KNOWN_BASES: frozenset[str] = frozenset({
+    "alpine", "ubuntu", "debian", "centos", "fedora", "rockylinux",
+    "amazonlinux", "rhel",
+    "busybox", "scratch",
+    "nginx", "httpd", "redis", "postgres", "mysql", "mariadb", "mongo",
+    "rabbitmq", "memcached", "elasticsearch",
+    "node", "python", "ruby", "openjdk", "eclipse-temurin", "amazoncorretto",
+    "golang", "rust", "php", "haskell", "erlang", "elixir",
+    "haproxy", "traefik", "envoy", "caddy",
+    "ghcr.io", "registry",  # less likely to appear bare but harmless
+})
+
+
+def _looks_like_image(ref: str) -> bool:
+    """True iff `ref` is plausibly a registry-pullable image reference (not
+    just a multi-stage alias like `builder`)."""
+    if not ref:
+        return False
+    if _LOOKS_LIKE_IMAGE_RE.search(ref):
+        return True
+    return ref.lower() in _WELL_KNOWN_BASES
 
 
 @dataclass
@@ -67,6 +90,19 @@ class ImageScanConfig:
     timeout: int = 600
     trivy_binary: str = "trivy"
     docker_binary: str = "docker"
+    # Repo paths to skip when discovering Dockerfiles. Same dir-prefix /
+    # fnmatch shape as `paths.exclude` in the main config.
+    exclude: list[str] | None = None
+
+    def __post_init__(self):
+        # `ref` and `build_locally` are documented as mutually exclusive but
+        # nothing previously enforced it; the runner would silently use `ref`.
+        # Surface the conflict early so the user notices.
+        if self.built_image_enabled and self.built_image_ref and self.build_locally:
+            raise ValueError(
+                "image_scan.built_image: `ref` and `build_locally` are mutually "
+                "exclusive — set one or the other, not both"
+            )
 
 
 def run(repo_dir: Path, cfg: ImageScanConfig) -> list[RunnerResult]:
@@ -80,7 +116,7 @@ def run(repo_dir: Path, cfg: ImageScanConfig) -> list[RunnerResult]:
     results: list[RunnerResult] = []
 
     if cfg.base_images:
-        for ref in _discover_base_images(repo_dir):
+        for ref in _discover_base_images(repo_dir, exclude=cfg.exclude or []):
             results.append(_scan_image(ref, cfg, source="base"))
 
     if cfg.built_image_enabled:
@@ -92,10 +128,14 @@ def run(repo_dir: Path, cfg: ImageScanConfig) -> list[RunnerResult]:
 # ---- Mode B: base images ----------------------------------------------------
 
 
-def _discover_base_images(repo_dir: Path) -> list[str]:
+def _discover_base_images(repo_dir: Path, exclude: list[str] | None = None) -> list[str]:
     """Walk `repo_dir` for `Dockerfile`-style files, extract every `FROM` ref,
     de-dup. We accept `Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, and
     `Containerfile` (Podman). Skips `.git`, `node_modules`, `vendor`.
+
+    `exclude` is honored same as `paths.exclude` in the main config: any
+    Dockerfile under an excluded prefix/glob is skipped — otherwise users
+    pulling a vendor-mirror would trigger unwanted base-image pulls.
 
     Stage aliases (multi-stage builds) and unresolved ARG-style refs are filtered
     out — only refs that look like real registry pulls are returned.
@@ -103,11 +143,24 @@ def _discover_base_images(repo_dir: Path) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     skip = {".git", "node_modules", "vendor", ".venv", "__pycache__"}
+    patterns = list(exclude or [])
 
     for dirpath, dirnames, filenames in os.walk(repo_dir):
-        dirnames[:] = [d for d in dirnames if d not in skip]
+        kept: list[str] = []
+        for d in dirnames:
+            if d in skip:
+                continue
+            child_rel = os.path.relpath(os.path.join(dirpath, d), repo_dir).replace(os.sep, "/")
+            if _path_excluded(child_rel, patterns):
+                continue
+            kept.append(d)
+        dirnames[:] = kept
+
         for fname in filenames:
             if not _is_dockerfile_name(fname):
+                continue
+            file_rel = os.path.relpath(os.path.join(dirpath, fname), repo_dir).replace(os.sep, "/")
+            if _path_excluded(file_rel, patterns):
                 continue
             try:
                 text = (Path(dirpath) / fname).read_text(errors="ignore")
@@ -119,6 +172,32 @@ def _discover_base_images(repo_dir: Path) -> list[str]:
                 seen.add(raw_ref)
                 out.append(raw_ref)
     return out
+
+
+def _path_excluded(rel: str, patterns: list[str]) -> bool:
+    """Match `rel` ("a/b/c") against dir-prefix-style and fnmatch patterns.
+    Same semantics as `detect._is_excluded` — kept local so the runner stays
+    standalone."""
+    import fnmatch
+    if not rel:
+        return False
+    for pat in patterns:
+        if not pat:
+            continue
+        if pat.endswith("/"):
+            prefix = pat.rstrip("/")
+            if rel == prefix or rel.startswith(prefix + "/"):
+                return True
+            continue
+        if fnmatch.fnmatch(rel, pat):
+            return True
+        parts = rel.split("/")
+        for i in range(len(parts)):
+            if fnmatch.fnmatch(parts[i], pat):
+                return True
+            if fnmatch.fnmatch("/".join(parts[: i + 1]), pat):
+                return True
+    return False
 
 
 def _is_dockerfile_name(fname: str) -> bool:
@@ -153,7 +232,7 @@ def _extract_from_refs(text: str) -> list[str]:
             continue
         if ref.lower() == "scratch":
             continue
-        if not _LOOKS_LIKE_IMAGE_RE.search(ref):
+        if not _looks_like_image(ref):
             # Bare name like "builder" — assume it's a stage alias.
             continue
         refs.append(ref)
