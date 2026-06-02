@@ -27,15 +27,16 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.2.0"
+version: "0.2.1"
 config_schema_version: 2
 docker_image: "leverj/security-scan"
 released: "2026-06-02"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
-  - "BREAKING: config moved from a single file to a directory (config/config.yaml). Bind-mount config/ at /config:ro."
-  - "BREAKING: replaced parent_issue (int) with project.{owner,number} — findings file into a GitHub Projects v2 board, not as sub-issues."
+  - "0.2.1: hardened image — base bumped to python:3.12-slim with apt-get upgrade for current security patches; container now runs as non-root user 'scanner' (uid 1000); SBOM + SLSA provenance attestations now attached on publish."
+  - "BREAKING (0.2.0): config moved from a single file to a directory (config/config.yaml). Bind-mount config/ at /config:ro."
+  - "BREAKING (0.2.0): replaced parent_issue (int) with project.{owner,number} — findings file into a GitHub Projects v2 board, not as sub-issues."
   - "PAT now needs `project` scope in addition to `repo`."
   - "Added Codex + Gemma LLM SAST scanners (off by default) with bidirectional cross-validation."
   - "Added bundled Semgrep rules: XSS, SQLi, Supabase migration patterns."

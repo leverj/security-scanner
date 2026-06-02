@@ -8,7 +8,7 @@
 #
 # Secrets via env:  GITHUB_TOKEN, SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN+SLACK_CHANNEL_ID
 
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 # Pin scanner versions so "new vs resolved" diffs aren't polluted by upstream churn.
 ARG OSV_SCANNER_VERSION=1.9.2
@@ -23,9 +23,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
+# Refresh OS packages with the latest security patches before installing.
+# `apt-get upgrade -y` is what closes Docker Scout's "fixable critical or high
+# vulnerabilities" findings against the base image's OS layer.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         git ca-certificates curl tar xz-utils \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # --- osv-scanner ----------------------------------------------------------
@@ -57,7 +62,11 @@ RUN set -eux; \
     gitleaks version
 
 # --- semgrep (pip — official channel) -------------------------------------
-RUN pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" \
+# python:3.12-slim no longer ships setuptools, and semgrep's transitive
+# opentelemetry-instrumentation dep imports `pkg_resources` (provided by
+# setuptools). Pin setuptools < 80 because newer setuptools dropped the
+# bundled `pkg_resources` module.
+RUN pip install --no-cache-dir "setuptools>=70,<80" "semgrep==${SEMGREP_VERSION}" \
     && semgrep --version
 
 # --- trivy (Aqua) — vuln + secret + iac + license, all in one ------------
@@ -76,8 +85,13 @@ RUN set -eux; \
     trivy --version
 
 # Pre-cache the trivy DBs at build time so first-run is fast and offline-OK.
-# (The runner passes --skip-db-update.)
-RUN trivy image --download-db-only && trivy image --download-java-db-only
+# (The runner passes --skip-db-update.) Cache lives in a world-readable
+# location so the non-root scanner user (added below) can read it.
+ENV TRIVY_CACHE_DIR=/var/cache/trivy
+RUN mkdir -p $TRIVY_CACHE_DIR \
+    && trivy --cache-dir $TRIVY_CACHE_DIR image --download-db-only \
+    && trivy --cache-dir $TRIVY_CACHE_DIR image --download-java-db-only \
+    && chmod -R a+rX $TRIVY_CACHE_DIR
 
 # --- trufflehog — verified secret detection ------------------------------
 RUN set -eux; \
@@ -123,6 +137,22 @@ RUN pip install --no-cache-dir /app
 # Make sure the mount points exist (no VOLUME directive — keeps `--rm` from
 # leaving anonymous volumes behind on each run).
 RUN mkdir -p /config /rules /work
+
+# --- non-root user -------------------------------------------------------
+# Run the scanner as an unprivileged user. /work is the only path the
+# container itself writes to (clones, SBOM output, gitleaks temp report);
+# /config is bind-mounted read-only and /rules is read-only. The trivy DB
+# cache (set above) is already world-readable.
+#
+# uid/gid 1000 matches the typical first non-root user on Linux hosts, so
+# files written under a host-mounted /work end up with a recognizable owner.
+RUN groupadd --system --gid 1000 scanner \
+    && useradd  --system --uid 1000 --gid 1000 \
+                --home-dir /home/scanner --create-home --shell /sbin/nologin \
+                scanner \
+    && chown -R scanner:scanner /work /home/scanner
+
+USER scanner
 
 # Default entrypoint runs the scanner against /config/config.yaml.
 ENTRYPOINT ["python", "-m", "security_scan", "--config", "/config/config.yaml", "--work-dir", "/work"]

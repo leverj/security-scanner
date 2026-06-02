@@ -216,10 +216,16 @@ EOH
     # `--load` doesn't support multi-arch (single-image local load only); for
     # --no-push we just build to the buildx cache without exporting, which still
     # exercises the full build and proves it would push cleanly.
+    #
+    # `--sbom=true` and `--provenance=mode=max` attach a CycloneDX SBOM and
+    # SLSA build provenance to the manifest list — these are what Docker Scout's
+    # "Missing supply chain attestation(s)" check looks for.
     local export_args=()
     (( push )) && export_args=(--push)
     docker buildx build \
       --platform linux/amd64,linux/arm64 \
+      --sbom=true \
+      --provenance=mode=max \
       -t "$image_versioned" \
       -t "$image_latest" \
       "${export_args[@]}" \
