@@ -8,14 +8,16 @@
 #
 # Secrets via env:  GITHUB_TOKEN, SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN+SLACK_CHANNEL_ID
 
-FROM python:3.12-slim AS base
+FROM python:3.14-slim AS base
 
 # Pin scanner versions so "new vs resolved" diffs aren't polluted by upstream churn.
-ARG OSV_SCANNER_VERSION=1.9.2
-ARG GITLEAKS_VERSION=8.21.2
-ARG SEMGREP_VERSION=1.97.0
-ARG TRIVY_VERSION=0.70.0
-ARG TRUFFLEHOG_VERSION=3.95.3
+# When bumping, prefer the most recent stable release: each rebuild against a newer
+# Go toolchain is what closes the stdlib CVEs Docker Scout flags inside our binaries.
+ARG OSV_SCANNER_VERSION=2.3.8
+ARG GITLEAKS_VERSION=8.30.1
+ARG SEMGREP_VERSION=1.164.0
+ARG TRIVY_VERSION=0.71.0
+ARG TRUFFLEHOG_VERSION=3.95.5
 ARG SYFT_VERSION=1.44.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -62,11 +64,14 @@ RUN set -eux; \
     gitleaks version
 
 # --- semgrep (pip — official channel) -------------------------------------
-# python:3.12-slim no longer ships setuptools, and semgrep's transitive
+# Upgrade pip/wheel/setuptools together so Scout doesn't catch a stale wheel
+# left behind from `ensurepip` bundling.
+# python:3.13-slim no longer ships setuptools, and semgrep's transitive
 # opentelemetry-instrumentation dep imports `pkg_resources` (provided by
 # setuptools). Pin setuptools < 80 because newer setuptools dropped the
 # bundled `pkg_resources` module.
-RUN pip install --no-cache-dir "setuptools>=70,<80" "semgrep==${SEMGREP_VERSION}" \
+RUN pip install --no-cache-dir --upgrade pip wheel "setuptools>=70,<80" \
+    && pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" \
     && semgrep --version
 
 # --- trivy (Aqua) — vuln + secret + iac + license, all in one ------------

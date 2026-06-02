@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "security-scan"
-version = "0.2.1"
+version = "0.2.2"
 description = "Stateless single-repo security scanner; files findings into a GitHub Projects v2 board"
 requires-python = ">=3.11"
 dependencies = [
