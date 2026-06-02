@@ -12,9 +12,9 @@ import sys
 
 import requests
 
-from secscan.config import SlackConfig
-from secscan.models import Finding
-from secscan.sync import SyncResult
+from security_scan.config import SlackConfig
+from security_scan.models import Finding
+from security_scan.sync import SyncResult
 
 
 def post_digest(
@@ -131,7 +131,7 @@ def _default_digest(
         by_sev[f.severity] = by_sev.get(f.severity, 0) + 1
 
     lines: list[str] = [
-        f":lock: *secscan* — `{repo}@{ref}` — "
+        f":lock: *security_scan* — `{repo}@{ref}` — "
         f"<https://github.com/orgs/{project_owner}/projects/{project_number}|"
         f"{project_owner}/projects/{project_number}>"
     ]

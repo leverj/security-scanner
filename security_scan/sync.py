@@ -10,9 +10,9 @@ import sys
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from secscan.fingerprint import inject_marker, parse_marker, resolve_fingerprint
-from secscan.github import GitHub, ProjectContext
-from secscan.models import Finding
+from security_scan.fingerprint import inject_marker, parse_marker, resolve_fingerprint
+from security_scan.github import GitHub, ProjectContext
+from security_scan.models import Finding
 
 
 class Triage(Protocol):
@@ -131,13 +131,13 @@ def sync(
 def _labels_for(f: Finding) -> list[str]:
     """The label set applied to a sub-issue.
 
-    `security` is the existing umbrella label. `secscan:<category>` lets you
+    `security` is the existing umbrella label. `security_scan:<category>` lets you
     filter the parent's sub-issue list by category in the GitHub UI.
-    `secscan:<severity>` lets you triage by severity. All labels are namespaced
-    under `secscan:` so they're easy to clean up if you ever drop the tool.
+    `security_scan:<severity>` lets you triage by severity. All labels are namespaced
+    under `security_scan:` so they're easy to clean up if you ever drop the tool.
     """
     return [
         "security",
-        f"secscan:{f.category}",
-        f"secscan:{f.severity}",
+        f"security-scan:{f.category}",
+        f"security-scan:{f.severity}",
     ]

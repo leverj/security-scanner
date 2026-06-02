@@ -11,7 +11,7 @@ from . import RunnerResult, _run
 def run(root: Path, exclude: list[str] | None = None, binary: str = "osv-scanner") -> RunnerResult:
     # NOTE: we intentionally do NOT pass --paths-to-ignore: the flag's name and
     # presence varies across osv-scanner versions (it's a hard error on 1.9.2).
-    # secscan.normalize.normalize_sarif() filters excluded paths post-hoc, so we
+    # security_scan.normalize.normalize_sarif() filters excluded paths post-hoc, so we
     # get the same effect with zero version coupling.
     _ = exclude  # accepted for signature stability; intentionally unused here
     cmd = [binary, "--format", "sarif", "--skip-git", "--recursive"]

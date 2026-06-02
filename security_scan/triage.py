@@ -20,10 +20,10 @@ import threading
 
 import requests
 
-from secscan.config import TriageConfig
-from secscan.fingerprint import parse_marker
-from secscan.models import Finding
-from secscan.sync import SyncResult, default_issue
+from security_scan.config import TriageConfig
+from security_scan.fingerprint import parse_marker
+from security_scan.models import Finding
+from security_scan.sync import SyncResult, default_issue
 
 
 class Triage:

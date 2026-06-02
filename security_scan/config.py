@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from secscan.models import SEVERITY_ORDER
+from security_scan.models import SEVERITY_ORDER
 
 
 class ConfigError(ValueError):
@@ -37,7 +37,7 @@ class ScannersConfig:
 @dataclass
 class CodexConfig:
     """Tunables for the local Codex CLI runner. Auth is via `codex login`
-    (ChatGPT subscription); secscan never sees an API key."""
+    (ChatGPT subscription); security_scan never sees an API key."""
     binary: str = "codex"
     model: str | None = None    # None => use codex's configured default
     timeout: int = 1200         # seconds; LLM scans can run minutes

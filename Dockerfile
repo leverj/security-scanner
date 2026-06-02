@@ -1,4 +1,4 @@
-# secscan — single-repo security scanner. Stateless. State lives in GitHub Issues.
+# security-scan — single-repo security scanner. Stateless. State lives in GitHub Issues.
 #
 # Mount points (bind-mount at runtime — no VOLUME directive, so anonymous volumes
 # never accumulate when --rm is used):
@@ -109,15 +109,15 @@ RUN set -eux; \
     chmod +x /usr/local/bin/syft; \
     syft --version
 
-# --- secscan itself -------------------------------------------------------
+# --- security-scan itself -------------------------------------------------------
 WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
-COPY secscan /app/secscan
+COPY security_scan /app/security_scan
 COPY README.md /app/README.md
 # Manifest the consuming skill reads to see version + needed config migrations.
 # Pull it out without starting the scanner:
-#   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECSCAN-MANIFEST.yaml
-COPY SECSCAN-MANIFEST.yaml /app/SECSCAN-MANIFEST.yaml
+#   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECURITY-SCAN-MANIFEST.yaml
+COPY SECURITY-SCAN-MANIFEST.yaml /app/SECURITY-SCAN-MANIFEST.yaml
 RUN pip install --no-cache-dir /app
 
 # Make sure the mount points exist (no VOLUME directive — keeps `--rm` from
@@ -125,5 +125,5 @@ RUN pip install --no-cache-dir /app
 RUN mkdir -p /config /rules /work
 
 # Default entrypoint runs the scanner against /config/config.yaml.
-ENTRYPOINT ["python", "-m", "secscan", "--config", "/config/config.yaml", "--work-dir", "/work"]
+ENTRYPOINT ["python", "-m", "security_scan", "--config", "/config/config.yaml", "--work-dir", "/work"]
 CMD []

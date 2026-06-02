@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from secscan.runners import codex as codex_runner
+from security_scan.runners import codex as codex_runner
 
 
 def _fake_completed(rc=0, stdout="", stderr=""):
@@ -39,8 +39,8 @@ def test_runner_happy_path(tmp_path):
         ]))
         return _fake_completed(0)
 
-    with patch("secscan.runners.codex.shutil.which", return_value="/usr/bin/codex"), \
-         patch("secscan.runners.codex.subprocess.run", side_effect=_fake_run):
+    with patch("security_scan.runners.codex.shutil.which", return_value="/usr/bin/codex"), \
+         patch("security_scan.runners.codex.subprocess.run", side_effect=_fake_run):
         result = codex_runner.run(tmp_path)
 
     assert result.completed is True
@@ -78,8 +78,8 @@ def test_runner_namespaces_rule_id_only_if_missing(tmp_path):
         ]))
         return _fake_completed(0)
 
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run", side_effect=_fake_run):
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run", side_effect=_fake_run):
         result = codex_runner.run(tmp_path)
     rule_ids = [r["ruleId"] for r in result.sarif["runs"][0]["results"]]
     assert "codex.already-prefixed" in rule_ids
@@ -87,7 +87,7 @@ def test_runner_namespaces_rule_id_only_if_missing(tmp_path):
 
 
 def test_runner_handles_missing_binary(tmp_path):
-    with patch("secscan.runners.codex.shutil.which", return_value=None):
+    with patch("security_scan.runners.codex.shutil.which", return_value=None):
         result = codex_runner.run(tmp_path)
     assert result.completed is False
     assert "binary not found" in result.error
@@ -95,8 +95,8 @@ def test_runner_handles_missing_binary(tmp_path):
 
 def test_runner_detects_auth_failure(tmp_path):
     """When codex isn't logged in it exits non-zero with an auth message — surface clearly."""
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run",
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run",
                return_value=_fake_completed(1, "", "Error: not logged in. Run `codex login`.")):
         result = codex_runner.run(tmp_path)
     assert result.completed is False
@@ -105,8 +105,8 @@ def test_runner_detects_auth_failure(tmp_path):
 
 
 def test_runner_returns_failure_on_non_zero_exit(tmp_path):
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run",
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run",
                return_value=_fake_completed(2, "", "internal model error")):
         result = codex_runner.run(tmp_path)
     assert result.completed is False
@@ -115,8 +115,8 @@ def test_runner_returns_failure_on_non_zero_exit(tmp_path):
 
 def test_runner_failure_when_no_output_file_written(tmp_path):
     """codex exited cleanly but produced no output — likely refused the task."""
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run", return_value=_fake_completed(0)):
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run", return_value=_fake_completed(0)):
         result = codex_runner.run(tmp_path)
     assert result.completed is False
     assert "no output" in result.error.lower()
@@ -128,8 +128,8 @@ def test_runner_failure_on_unparseable_output(tmp_path):
         Path(cmd[idx + 1]).write_text("this is not json {{{ <-- broken")
         return _fake_completed(0)
 
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run", side_effect=_fake_run):
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run", side_effect=_fake_run):
         result = codex_runner.run(tmp_path)
     assert result.completed is False
     assert "parse" in result.error.lower()
@@ -137,8 +137,8 @@ def test_runner_failure_on_unparseable_output(tmp_path):
 
 def test_runner_timeout(tmp_path):
     import subprocess
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run",
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run",
                side_effect=subprocess.TimeoutExpired(cmd="codex", timeout=10)):
         result = codex_runner.run(tmp_path, timeout=10)
     assert result.completed is False
@@ -155,8 +155,8 @@ def test_runner_skips_findings_without_file(tmp_path):
         ]))
         return _fake_completed(0)
 
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run", side_effect=_fake_run):
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run", side_effect=_fake_run):
         result = codex_runner.run(tmp_path)
     paths = [r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
              for r in result.sarif["runs"][0]["results"]]
@@ -172,8 +172,8 @@ def test_runner_unknown_severity_defaults_to_medium(tmp_path):
         ]))
         return _fake_completed(0)
 
-    with patch("secscan.runners.codex.shutil.which", return_value="/x/codex"), \
-         patch("secscan.runners.codex.subprocess.run", side_effect=_fake_run):
+    with patch("security_scan.runners.codex.shutil.which", return_value="/x/codex"), \
+         patch("security_scan.runners.codex.subprocess.run", side_effect=_fake_run):
         result = codex_runner.run(tmp_path)
     r = result.sarif["runs"][0]["results"][0]
     assert r["properties"]["security-severity"] == "5.5"  # medium

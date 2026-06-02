@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from secscan.github import GitHub, GitHubError, ProjectField
+from security_scan.github import GitHub, GitHubError, ProjectField
 
 TOKEN = "ghp_supersecrettoken_abcdef123456"
 
@@ -31,7 +31,7 @@ def _gh(dry_run=False):
 def test_clone_shallow_uses_depth_1(tmp_path):
     gh = _gh()
     completed = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("secscan.github.subprocess.run", return_value=completed) as m:
+    with patch("security_scan.github.subprocess.run", return_value=completed) as m:
         gh.clone("dev", tmp_path / "repo", shallow=True)
     args = m.call_args.args[0]
     assert args[0] == "git"
@@ -45,7 +45,7 @@ def test_clone_shallow_uses_depth_1(tmp_path):
 def test_clone_full_omits_depth(tmp_path):
     gh = _gh()
     completed = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("secscan.github.subprocess.run", return_value=completed) as m:
+    with patch("security_scan.github.subprocess.run", return_value=completed) as m:
         gh.clone("dev", tmp_path / "repo", shallow=False)
     args = m.call_args.args[0]
     assert "--depth=1" not in args
@@ -55,7 +55,7 @@ def test_clone_url_has_no_credentials(tmp_path):
     """The clone URL must not embed the token — git would persist it into .git/config."""
     gh = _gh()
     completed = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("secscan.github.subprocess.run", return_value=completed) as m:
+    with patch("security_scan.github.subprocess.run", return_value=completed) as m:
         gh.clone("dev", tmp_path / "repo")
     args = m.call_args.args[0]
     url = next(a for a in args if a.startswith("https://"))
@@ -69,7 +69,7 @@ def test_clone_passes_token_via_one_shot_config(tmp_path):
 
     gh = _gh()
     completed = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("secscan.github.subprocess.run", return_value=completed) as m:
+    with patch("security_scan.github.subprocess.run", return_value=completed) as m:
         gh.clone("dev", tmp_path / "repo")
     args = m.call_args.args[0]
     assert "-c" in args
@@ -88,7 +88,7 @@ def test_clone_scrubs_token_from_error(tmp_path):
     gh = _gh()
     leaky = f"fatal: could not read from https://x-access-token:{TOKEN}@github.com/leverj/ezel.git"
     completed = MagicMock(returncode=128, stdout="", stderr=leaky)
-    with patch("secscan.github.subprocess.run", return_value=completed):
+    with patch("security_scan.github.subprocess.run", return_value=completed):
         with pytest.raises(GitHubError) as ei:
             gh.clone("dev", tmp_path / "repo")
     assert TOKEN not in str(ei.value)
@@ -102,14 +102,14 @@ def test_create_issue_posts_correct_payload():
     created = {"id": 9001, "node_id": "I_xxx", "number": 42, "title": "t", "body": "b", "html_url": "u", "state": "open"}
     resp = _resp(201, json_body=created, headers={})
     with patch.object(requests.Session, "request", return_value=resp) as m:
-        out = gh.create_issue("t", "b", labels=["security", "secscan"])
+        out = gh.create_issue("t", "b", labels=["security", "security_scan"])
     assert out == created
     call = m.call_args
     method = call.args[0] if call.args else call.kwargs["method"]
     url = call.args[1] if len(call.args) > 1 else call.kwargs["url"]
     assert method == "POST"
     assert url == "https://api.github.com/repos/leverj/ezel/issues"
-    assert call.kwargs["json"] == {"title": "t", "body": "b", "labels": ["security", "secscan"]}
+    assert call.kwargs["json"] == {"title": "t", "body": "b", "labels": ["security", "security_scan"]}
     assert gh.session.headers["Authorization"] == f"Bearer {TOKEN}"
     assert gh.session.headers["Accept"] == "application/vnd.github+json"
     assert gh.session.headers["X-GitHub-Api-Version"] == "2022-11-28"
@@ -318,7 +318,7 @@ def test_set_project_field_calls_update_mutation():
 
 
 def test_set_project_field_unknown_option_is_noop():
-    """If the user renamed an option, secscan must not crash — silently skip."""
+    """If the user renamed an option, security_scan must not crash — silently skip."""
     gh = _gh()
     field = ProjectField(id="FID", options={"critical": "o-crit"})
     with patch.object(requests.Session, "request") as m:
@@ -354,7 +354,7 @@ def test_retry_on_500():
     gh = _gh()
     bad = _resp(500, json_body={"message": "boom"})
     good = _resp(201, json_body={"id": 1, "node_id": "I_x", "number": 1, "title": "t", "body": "b", "html_url": "u", "state": "open"})
-    with patch("secscan.github.time.sleep") as sl, \
+    with patch("security_scan.github.time.sleep") as sl, \
          patch.object(requests.Session, "request", side_effect=[bad, good]) as m:
         gh.create_issue("t", "b")
     assert m.call_count == 2
@@ -371,7 +371,7 @@ def test_rate_limit_waits_and_retries():
         headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(reset_at)},
     )
     good = _resp(201, json_body={"id": 1, "node_id": "I_x", "number": 1, "title": "t", "body": "b", "html_url": "u", "state": "open"})
-    with patch("secscan.github.time.sleep") as sl, \
+    with patch("security_scan.github.time.sleep") as sl, \
          patch.object(requests.Session, "request", side_effect=[limited, good]) as m:
         gh.create_issue("t", "b")
     assert m.call_count == 2

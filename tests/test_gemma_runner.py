@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from secscan.runners import gemma as gemma_runner
+from security_scan.runners import gemma as gemma_runner
 
 
 def _ollama_resp(payload: dict, status=200):
@@ -44,7 +44,7 @@ def test_runner_happy_path(tmp_path):
              "message": "Concatenating user input into SQL.", "snippet": "db.query('... ' + n)"},
         ]
     }
-    with patch("secscan.runners.gemma.requests.post", return_value=_ollama_resp(payload)) as p:
+    with patch("security_scan.runners.gemma.requests.post", return_value=_ollama_resp(payload)) as p:
         result = gemma_runner.run(tmp_path)
     assert result.completed is True
     results = result.sarif["runs"][0]["results"]
@@ -60,7 +60,7 @@ def test_runner_happy_path(tmp_path):
 def test_runner_unreachable_ollama(tmp_path):
     _drop_source(tmp_path)
     import requests
-    with patch("secscan.runners.gemma.requests.post",
+    with patch("security_scan.runners.gemma.requests.post",
                side_effect=requests.ConnectionError("ollama down")):
         result = gemma_runner.run(tmp_path)
     assert result.completed is False
@@ -72,7 +72,7 @@ def test_runner_http_error(tmp_path):
     r = MagicMock()
     r.status_code = 500
     r.text = "server error"
-    with patch("secscan.runners.gemma.requests.post", return_value=r):
+    with patch("security_scan.runners.gemma.requests.post", return_value=r):
         result = gemma_runner.run(tmp_path)
     assert result.completed is False
     assert "500" in result.error
@@ -83,7 +83,7 @@ def test_runner_parse_error_on_malformed_content(tmp_path):
     r = MagicMock()
     r.status_code = 200
     r.json.return_value = {"message": {"content": "not json at all"}}
-    with patch("secscan.runners.gemma.requests.post", return_value=r):
+    with patch("security_scan.runners.gemma.requests.post", return_value=r):
         result = gemma_runner.run(tmp_path)
     assert result.completed is False
     assert "parse" in result.error.lower()
@@ -96,7 +96,7 @@ def test_runner_namespaces_rule_id(tmp_path):
          "title": "t", "message": "m"},
         {"file": "y.py", "rule_id": "raw-rule", "severity": "low", "title": "t", "message": "m"},
     ]}
-    with patch("secscan.runners.gemma.requests.post", return_value=_ollama_resp(payload)):
+    with patch("security_scan.runners.gemma.requests.post", return_value=_ollama_resp(payload)):
         result = gemma_runner.run(tmp_path)
     rule_ids = {r["ruleId"] for r in result.sarif["runs"][0]["results"]}
     assert "gemma.raw-rule" in rule_ids
@@ -117,7 +117,7 @@ def test_runner_caps_file_count_and_total_bytes(tmp_path):
         captured["body"] = kwargs["json"]
         return _ollama_resp({"findings": []})
 
-    with patch("secscan.runners.gemma.requests.post", side_effect=_capture):
+    with patch("security_scan.runners.gemma.requests.post", side_effect=_capture):
         gemma_runner.run(tmp_path, max_files=3, max_file_bytes=1000, max_total_bytes=5000)
 
     user_msg = next(m["content"] for m in captured["body"]["messages"] if m["role"] == "user")
@@ -142,7 +142,7 @@ def test_runner_skips_node_modules_and_friends(tmp_path):
         captured["body"] = kwargs["json"]
         return _ollama_resp({"findings": []})
 
-    with patch("secscan.runners.gemma.requests.post", side_effect=_capture):
+    with patch("security_scan.runners.gemma.requests.post", side_effect=_capture):
         gemma_runner.run(tmp_path)
 
     user_msg = next(m["content"] for m in captured["body"]["messages"] if m["role"] == "user")
@@ -159,7 +159,7 @@ def test_runner_drops_findings_without_file(tmp_path):
         {"file": "", "rule_id": "no-path", "severity": "low", "title": "t", "message": "m"},
         {"file": "src/auth.py", "rule_id": "ok", "severity": "low", "title": "t", "message": "m"},
     ]}
-    with patch("secscan.runners.gemma.requests.post", return_value=_ollama_resp(payload)):
+    with patch("security_scan.runners.gemma.requests.post", return_value=_ollama_resp(payload)):
         result = gemma_runner.run(tmp_path)
     paths = [r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
              for r in result.sarif["runs"][0]["results"]]
@@ -171,7 +171,7 @@ def test_runner_findings_not_a_list_is_failure(tmp_path):
     r = MagicMock()
     r.status_code = 200
     r.json.return_value = {"message": {"content": json.dumps({"findings": "not a list"})}}
-    with patch("secscan.runners.gemma.requests.post", return_value=r):
+    with patch("security_scan.runners.gemma.requests.post", return_value=r):
         result = gemma_runner.run(tmp_path)
     assert result.completed is False
     assert "schema" in result.error.lower()

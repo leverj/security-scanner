@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from secscan.detect import ScannerTarget, detect_stack
+from security_scan.detect import ScannerTarget, detect_stack
 
 ALL_ON = {
     "osv": True, "gitleaks": True, "semgrep": True,

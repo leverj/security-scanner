@@ -1,4 +1,4 @@
-# secscan — Architecture & Build Spec (v1)
+# security-scan — Architecture & Build Spec (v1)
 
 A single‑repo, stateless, self‑hosted security scanner that detects a repo's tech stack,
 runs the right scanners, and files each finding as a deduplicated GitHub sub‑issue under a
@@ -44,7 +44,7 @@ This document is written to be handed to Claude Code and built module by module.
 ## 3. Module breakdown
 
 ```
-secscan/
+security-scan/
   config.py        # load + validate config (YAML) and env (token)
   detect.py        # stack detection (manifest walk + optional Linguist cross-check)
   runners/         # one module per scanner, each returns SARIF (or is normalized to it)
@@ -102,7 +102,7 @@ fingerprint = "fp_" + sha256(key_basis).hexdigest()[:16]
 
 **Marker** embedded in every issue body (hidden HTML comment), so a future run can read it back:
 ```
-<!-- secscan: fp=fp_ab12cd34ef56 rule=GHSA-xxxx cat=dependency -->
+<!-- security-scan: fp=fp_ab12cd34ef56 rule=GHSA-xxxx cat=dependency -->
 ```
 
 `github.py` lists **all** sub‑issues of the parent (state=all), parses these markers, and builds the set of already‑filed fingerprints.
@@ -223,7 +223,7 @@ Volumes:
   /work     (rw)   -> ephemeral per-run clone + scratch (can be tmpfs)
 Secrets:
   GITHUB_TOKEN, SLACK_* via env (docker run --env-file, Docker secret, or 1Password injection)
-Entrypoint: python -m secscan --config /config/config.yaml
+Entrypoint: python -m security-scan --config /config/config.yaml
 ```
 Stateless: the container holds no state between runs; everything durable is in GitHub Issues. The clone lives in `/work` and is wiped each run. Token file (if used instead of env) must be `600` and is never logged (mask in all output).
 

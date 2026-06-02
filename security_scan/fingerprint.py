@@ -10,10 +10,13 @@ from __future__ import annotations
 import hashlib
 import re
 
-from secscan.models import Finding
+from security_scan.models import Finding
 
 MARKER_RE = re.compile(
-    r"<!--\s*secscan:\s*fp=(?P<fp>fp_[a-f0-9]{16})\s+rule=(?P<rule>[^\s]+)\s+cat=(?P<cat>[a-z]+)\s*-->"
+    # Accept legacy `secscan:` marker too so issues filed by the pre-rename code
+    # still match for dedup. New markers are written as `security-scan:` (see
+    # inject_marker below).
+    r"<!--\s*(?:security-scan|secscan):\s*fp=(?P<fp>fp_[a-f0-9]{16})\s+rule=(?P<rule>[^\s]+)\s+cat=(?P<cat>[a-z]+)\s*-->"
 )
 
 
@@ -68,7 +71,7 @@ def resolve_fingerprint(f: Finding) -> str:
 
 def inject_marker(body: str, fp: str, f: Finding) -> str:
     """Append the hidden marker to an issue body. Code-owned, regardless of LLM prose."""
-    marker = f"<!-- secscan: fp={fp} rule={f.rule_id} cat={f.category} -->"
+    marker = f"<!-- security-scan: fp={fp} rule={f.rule_id} cat={f.category} -->"
     if MARKER_RE.search(body):
         return MARKER_RE.sub(marker, body)
     sep = "\n\n" if body and not body.endswith("\n") else ""

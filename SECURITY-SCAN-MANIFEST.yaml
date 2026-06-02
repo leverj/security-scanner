@@ -1,10 +1,10 @@
-# SECSCAN-MANIFEST.yaml
+# SECURITY-SCAN-MANIFEST.yaml
 #
 # Declarative contract between this image and any tool (skill, CI job, etc.)
-# that drives it. Baked into the image at /app/SECSCAN-MANIFEST.yaml.
+# that drives it. Baked into the image at /app/SECURITY-SCAN-MANIFEST.yaml.
 #
 # Read it from outside the running container with:
-#   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECSCAN-MANIFEST.yaml
+#   docker run --rm --entrypoint cat leverj/security-scan:<tag> /app/SECURITY-SCAN-MANIFEST.yaml
 #
 # Contract:
 #  - `version` matches pyproject.toml's [project.version] and the docker tag.
@@ -102,15 +102,15 @@ config:
     - from: "parent_issue"
       to:   "project"
       since: 2
-      note: "parent_issue (int) -> project (mapping). secscan no longer files as sub-issues under a parent epic; findings are flat items in a Projects v2 board. The skill should drop parent_issue from the user's config and prompt for project.{owner,number}."
+      note: "parent_issue (int) -> project (mapping). security-scan no longer files as sub-issues under a parent epic; findings are flat items in a Projects v2 board. The skill should drop parent_issue from the user's config and prompt for project.{owner,number}."
 
   removed_fields: []
 
 # Files inside the image worth knowing about (for documentation purposes —
 # skills don't typically need to reach in past the entrypoint).
 image_paths:
-  manifest: "/app/SECSCAN-MANIFEST.yaml"
-  source: "/app/secscan/"
-  rules:  "/app/secscan/rules/"
+  manifest: "/app/SECURITY-SCAN-MANIFEST.yaml"
+  source: "/app/security-scan/"
+  rules:  "/app/security-scan/rules/"
   config_mount: "/config"
   work_mount:   "/work"

@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 import pytest
 
-from secscan.runners import RunnerResult, _run
-from secscan.runners import gitleaks as gitleaks_runner
-from secscan.runners import osv as osv_runner
-from secscan.runners import semgrep as semgrep_runner
+from security_scan.runners import RunnerResult, _run
+from security_scan.runners import gitleaks as gitleaks_runner
+from security_scan.runners import osv as osv_runner
+from security_scan.runners import semgrep as semgrep_runner
 
 TINY_SARIF = {
     "version": "2.1.0",
@@ -56,7 +56,7 @@ def _assert_no_execute_verbs(cmd: list[str]) -> None:
 # --- _run --------------------------------------------------------------------
 
 def test_run_invokes_subprocess_with_cwd(tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
+    with patch("security_scan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(0, "hello", "")
         rc, out, err = _run(["echo", "hi"], cwd=tmp_path)
     assert (rc, out, err) == (0, "hello", "")
@@ -78,7 +78,7 @@ def test_run_invokes_subprocess_with_cwd(tmp_path: Path):
     ],
 )
 def test_runner_exit_zero_returns_parsed_sarif(module, kwargs, scanner, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(0, TINY_SARIF_JSON, "")) as m:
+    with patch("security_scan.runners.subprocess.run", side_effect=_fake_side_effect(0, TINY_SARIF_JSON, "")) as m:
         result: RunnerResult = module.run(tmp_path, **kwargs)
     assert result.completed is True
     assert result.scanner == scanner
@@ -107,7 +107,7 @@ def test_runner_exit_zero_returns_parsed_sarif(module, kwargs, scanner, tmp_path
 def test_runner_vulns_found_exit_code_is_success(
     module, kwargs, scanner, vuln_rc, tmp_path: Path
 ):
-    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(vuln_rc, TINY_SARIF_JSON, "")) as m:
+    with patch("security_scan.runners.subprocess.run", side_effect=_fake_side_effect(vuln_rc, TINY_SARIF_JSON, "")) as m:
         result = module.run(tmp_path, **kwargs)
     assert m.called
     assert result.completed is True
@@ -127,7 +127,7 @@ def test_runner_vulns_found_exit_code_is_success(
     ],
 )
 def test_runner_binary_not_found(module, kwargs, binary_name, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run", side_effect=FileNotFoundError(binary_name)):
+    with patch("security_scan.runners.subprocess.run", side_effect=FileNotFoundError(binary_name)):
         result = module.run(tmp_path, **kwargs)
     assert result.completed is False
     assert result.sarif is None
@@ -146,7 +146,7 @@ def test_runner_binary_not_found(module, kwargs, binary_name, tmp_path: Path):
     ],
 )
 def test_runner_unexpected_exit_code_is_failure(module, kwargs, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
+    with patch("security_scan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(99, "", "boom")
         result = module.run(tmp_path, **kwargs)
     assert result.completed is False
@@ -165,7 +165,7 @@ def test_runner_unexpected_exit_code_is_failure(module, kwargs, tmp_path: Path):
     ],
 )
 def test_runner_unparseable_json_is_failure(module, kwargs, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(0, "not json at all <<<", "")):
+    with patch("security_scan.runners.subprocess.run", side_effect=_fake_side_effect(0, "not json at all <<<", "")):
         result = module.run(tmp_path, **kwargs)
     assert result.completed is False
     assert result.sarif is None
@@ -184,7 +184,7 @@ def test_runner_unparseable_json_is_failure(module, kwargs, tmp_path: Path):
     ],
 )
 def test_runner_cmd_has_no_execute_verbs(module, kwargs, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
+    with patch("security_scan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
         module.run(tmp_path, **kwargs)
     cmd = m.call_args.args[0]
@@ -202,7 +202,7 @@ def test_runner_cmd_has_no_execute_verbs(module, kwargs, tmp_path: Path):
     ],
 )
 def test_runner_subprocess_cwd_is_set(module, kwargs, tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
+    with patch("security_scan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
         module.run(tmp_path, **kwargs)
     cwd = m.call_args.kwargs.get("cwd")
@@ -216,7 +216,7 @@ def test_osv_does_not_pass_paths_to_ignore(tmp_path: Path):
     """osv-scanner's exclude flag name varies by version (and is unsupported on
     1.9.2). We rely on post-hoc filtering in normalize.py instead — assert the
     flag is never passed even when excludes are configured."""
-    with patch("secscan.runners.subprocess.run") as m:
+    with patch("security_scan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
         osv_runner.run(tmp_path, exclude=["vendor/", "archive/"])
     cmd = m.call_args.args[0]
@@ -228,7 +228,7 @@ def test_osv_does_not_pass_paths_to_ignore(tmp_path: Path):
 # --- semgrep-specific: excludes + config wired in ---------------------------
 
 def test_semgrep_passes_config_and_excludes(tmp_path: Path):
-    with patch("secscan.runners.subprocess.run") as m:
+    with patch("security_scan.runners.subprocess.run") as m:
         m.return_value = _fake_completed(0, TINY_SARIF_JSON, "")
         semgrep_runner.run(tmp_path, rules_dir="/rules", exclude=["archive/", "vendor/"])
     cmd = m.call_args.args[0]
@@ -244,7 +244,7 @@ def test_semgrep_passes_config_and_excludes(tmp_path: Path):
 def test_gitleaks_writes_report_to_tempfile_in_root(tmp_path: Path):
     """v8 ignores `--report-path -` (silently writes 0 bytes to stdout). We must
     pass a real file path inside the scan root."""
-    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(0, TINY_SARIF_JSON, "")) as m:
+    with patch("security_scan.runners.subprocess.run", side_effect=_fake_side_effect(0, TINY_SARIF_JSON, "")) as m:
         gitleaks_runner.run(tmp_path)
     cmd = m.call_args.args[0]
     assert "--report-format" in cmd
@@ -267,7 +267,7 @@ def test_gitleaks_tempfile_is_cleaned_up_after_run(tmp_path: Path):
         Path(cmd[idx + 1]).write_text(TINY_SARIF_JSON)
         return _fake_completed(0, "", "")
 
-    with patch("secscan.runners.subprocess.run", side_effect=_capture):
+    with patch("security_scan.runners.subprocess.run", side_effect=_capture):
         gitleaks_runner.run(tmp_path)
     assert not Path(captured_path["p"]).exists()
 
@@ -276,7 +276,7 @@ def test_gitleaks_tempfile_is_cleaned_up_after_run(tmp_path: Path):
 def test_gitleaks_accepts_any_exit_code_when_report_parses(rc, tmp_path: Path):
     """v7 used rc=77 for "leaks found"; v8 uses rc=1. We trust the SARIF parse,
     not the exit code: if the report file is valid SARIF the run was successful."""
-    with patch("secscan.runners.subprocess.run", side_effect=_fake_side_effect(rc, TINY_SARIF_JSON, "")):
+    with patch("security_scan.runners.subprocess.run", side_effect=_fake_side_effect(rc, TINY_SARIF_JSON, "")):
         result = gitleaks_runner.run(tmp_path)
     assert result.completed is True
     assert result.sarif == TINY_SARIF
@@ -284,7 +284,7 @@ def test_gitleaks_accepts_any_exit_code_when_report_parses(rc, tmp_path: Path):
 
 def test_gitleaks_no_report_file_written_is_failure(tmp_path: Path):
     """Genuine failure: scanner didn't write the report. Empty/missing file -> error."""
-    with patch("secscan.runners.subprocess.run", return_value=_fake_completed(1, "", "config error")):
+    with patch("security_scan.runners.subprocess.run", return_value=_fake_completed(1, "", "config error")):
         result = gitleaks_runner.run(tmp_path)
     assert result.completed is False
     assert "no SARIF report written" in (result.error or "") or "exit 1" in (result.error or "")

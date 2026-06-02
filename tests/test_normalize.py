@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from secscan.fingerprint import resolve_fingerprint
-from secscan.normalize import normalize_sarif
+from security_scan.fingerprint import resolve_fingerprint
+from security_scan.normalize import normalize_sarif
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sarif"
 

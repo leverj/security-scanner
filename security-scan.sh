@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Convenience wrapper for building and running the secscan container.
+# Convenience wrapper for building and running the security-scan container.
 #
-#   ./secscan.sh build              -> docker build the image
-#   ./secscan.sh run [args...]      -> docker run, default --dry-run, forwards extra args
-#   ./secscan.sh check              -> validate setup (config, secrets, docker, image)
+#   ./security-scan.sh build              -> docker build the image
+#   ./security-scan.sh run [args...]      -> docker run, default --dry-run, forwards extra args
+#   ./security-scan.sh check              -> validate setup (config, secrets, docker, image)
 #
 # Two things are config-driven and read from config.yaml at runtime:
 #
@@ -25,15 +25,15 @@
 #
 # Default config directory: ./config/. Override with one of:
 #   --config /path/to/cfg.yaml     # explicit file path (its parent dir is mounted)
-#   SECSCAN_CONFIG=...             # same thing via env var
+#   SECURITY_SCAN_CONFIG=...             # same thing via env var
 #   SECSCAN_CONFIG_DIR=...         # mount this dir instead; expects config.yaml inside
 #
-# When the skill packages secscan, point SECSCAN_CONFIG_DIR at the per-project
+# When the skill packages security-scan, point SECSCAN_CONFIG_DIR at the per-project
 # config the agent maintains for the user.
 
 set -euo pipefail
 
-IMAGE="${SECSCAN_IMAGE:-secscan:latest}"
+IMAGE="${SECURITY_SCAN_IMAGE:-security-scan:latest}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_CONFIG_DIR="$HERE/config"
 
@@ -124,7 +124,7 @@ cmd_build() {
 
 cmd_check() {
   local config_dir="${SECSCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
-  local config="${SECSCAN_CONFIG:-$config_dir/config.yaml}"
+  local config="${SECURITY_SCAN_CONFIG:-$config_dir/config.yaml}"
   local ok=1
 
   echo "== config =="
@@ -152,7 +152,7 @@ cmd_check() {
   if docker image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "  ✓ $IMAGE present"
   else
-    echo "  ⚠ $IMAGE not built yet — run: ./secscan.sh build"
+    echo "  ⚠ $IMAGE not built yet — run: ./security-scan.sh build"
   fi
 
   if [[ -f "$config" ]]; then
@@ -201,10 +201,10 @@ cmd_check() {
 
   echo
   if [[ $ok -eq 1 ]]; then
-    echo "all good. try: ./secscan.sh run"
+    echo "all good. try: ./security-scan.sh run"
     return 0
   else
-    echo "fix the ✗ items above, then re-run ./secscan.sh check"
+    echo "fix the ✗ items above, then re-run ./security-scan.sh check"
     return 1
   fi
 }
@@ -213,7 +213,7 @@ cmd_run() {
   command -v docker >/dev/null || die "docker not on PATH"
 
   local config_dir="${SECSCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
-  local config="${SECSCAN_CONFIG:-$config_dir/config.yaml}"
+  local config="${SECURITY_SCAN_CONFIG:-$config_dir/config.yaml}"
   local extra_args=()
   local have_dry_run=0
 
@@ -290,7 +290,7 @@ Two ways to fix this:
 
   1) Export it now:
        export GITHUB_TOKEN=github_pat_xxx       # see README.md "Option A"
-       ./secscan.sh run
+       ./security-scan.sh run
 
   2) Switch to 1Password (recommended for daily use):
        # in config.yaml
@@ -300,9 +300,9 @@ Two ways to fix this:
        # then:
        cp .env.1password.tpl.example .env.1password.tpl
        \$EDITOR .env.1password.tpl               # set op:// vault paths
-       ./secscan.sh run
+       ./security-scan.sh run
 
-Run \`./secscan.sh check\` to see your full setup status.
+Run \`./security-scan.sh check\` to see your full setup status.
 EOF
         exit 1
       fi
@@ -319,7 +319,7 @@ Either export them:
 
 …or set slack.enabled: false in $config to disable Slack for this run.
 
-Run \`./secscan.sh check\` to see your full setup status.
+Run \`./security-scan.sh check\` to see your full setup status.
 EOF
         exit 1
       fi
@@ -352,7 +352,7 @@ Create it from the committed template:
   cp config/.env.1password.tpl.example config/.env.1password.tpl
   \$EDITOR config/.env.1password.tpl        # set op://<vault>/<item>/<field> paths
 
-The template lists every env var secscan understands.
+The template lists every env var security-scan understands.
 EOF
         exit 1
       fi
@@ -380,21 +380,21 @@ case "${1:-}" in
   check) shift; cmd_check "$@" ;;
   ""|-h|--help)
     cat <<EOF
-secscan.sh — build/run the secscan container
+security-scan.sh — build/run the security-scan container
 
 usage:
-  ./secscan.sh build
-  ./secscan.sh run [--config path/to/config.yaml]
+  ./security-scan.sh build
+  ./security-scan.sh run [--config path/to/config.yaml]
                    [--config-dir path/to/config_dir]
                    [--dry-run|--no-dry-run]
-                   [extra secscan args...]
-  ./secscan.sh check
+                   [extra security-scan args...]
+  ./security-scan.sh check
 
 defaults:
   --dry-run is added unless you pass --no-dry-run
   --config-dir defaults to ./config/ (override with SECSCAN_CONFIG_DIR env)
-  --config defaults to <config-dir>/config.yaml (override with SECSCAN_CONFIG env)
-  image tag defaults to "secscan:latest" (override with SECSCAN_IMAGE env)
+  --config defaults to <config-dir>/config.yaml (override with SECURITY_SCAN_CONFIG env)
+  image tag defaults to "security-scan:latest" (override with SECURITY_SCAN_IMAGE env)
 
 The whole --config-dir is bind-mounted read-only at /config inside the container,
 so any related files (the 1Password env template, etc.) ride along.
@@ -412,7 +412,7 @@ slack (driven by config.yaml):
   slack.enabled: true with slack.channel_id_env + slack.bot_token_env
                              -> both named vars must be set (uses chat.postMessage)
 
-Run \`./secscan.sh check\` for a full setup status.
+Run \`./security-scan.sh check\` for a full setup status.
 EOF
     ;;
   *) die "unknown command: $1 (try 'build', 'run', or 'check')" ;;

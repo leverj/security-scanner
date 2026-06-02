@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock
 
-from secscan.fingerprint import inject_marker, resolve_fingerprint
-from secscan.github import ProjectContext, ProjectField
-from secscan.models import Finding
-from secscan.sync import default_issue, sync
+from security_scan.fingerprint import inject_marker, resolve_fingerprint
+from security_scan.github import ProjectContext, ProjectField
+from security_scan.models import Finding
+from security_scan.sync import default_issue, sync
 
 
 def _project():
@@ -112,7 +112,7 @@ def test_marker_is_always_injected_on_created_body():
     gh = _gh(existing=[])
     sync([f], gh, _project())
     body = gh.create_issue.call_args.args[1] if gh.create_issue.call_args.args else gh.create_issue.call_args.kwargs["body"]
-    assert "<!-- secscan:" in body
+    assert "<!-- security-scan:" in body
     assert resolve_fingerprint(f) in body
 
 
@@ -158,8 +158,8 @@ def test_labels_include_category_and_severity():
     sync([f], gh, _project())
     labels = gh.create_issue.call_args.kwargs.get("labels") or gh.create_issue.call_args.args[2]
     assert "security" in labels
-    assert "secscan:sast" in labels
-    assert "secscan:high" in labels
+    assert "security-scan:sast" in labels
+    assert "security-scan:high" in labels
 
 
 def test_labels_for_supply_chain_category():
@@ -170,8 +170,8 @@ def test_labels_for_supply_chain_category():
     gh = _gh(existing=[])
     sync([f], gh, _project())
     labels = gh.create_issue.call_args.kwargs.get("labels") or gh.create_issue.call_args.args[2]
-    assert "secscan:iac" in labels
-    assert "secscan:medium" in labels
+    assert "security-scan:iac" in labels
+    assert "security-scan:medium" in labels
 
 
 def test_uses_triage_prose_when_available():
@@ -187,7 +187,7 @@ def test_uses_triage_prose_when_available():
     body = args.args[1] if len(args.args) >= 2 else args.kwargs["body"]
     assert title == "LLM Title"
     assert "LLM Body" in body
-    assert "<!-- secscan:" in body  # marker still injected by code
+    assert "<!-- security-scan:" in body  # marker still injected by code
 
 
 def test_severity_and_category_fields_set_with_correct_options():

@@ -25,7 +25,7 @@ import requests
 
 from . import RunnerResult
 
-# Extensions worth feeding to the model. Mirrors secscan/detect._SEMGREP_EXTS with
+# Extensions worth feeding to the model. Mirrors security_scan/detect._SEMGREP_EXTS with
 # a few SQL/HCL/TF additions since LLM reading isn't limited to semgrep's parsers.
 _SOURCE_EXTS = {
     ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",

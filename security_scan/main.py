@@ -14,19 +14,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-from secscan.config import Config, ConfigError, load_config
-from secscan.detect import DetectionResult, ScannerTarget, detect_stack
-from secscan.github import GitHub, GitHubError
-from secscan.models import Finding
-from secscan.normalize import normalize_sarif
-from secscan.notify import post_digest
-from secscan.runners import RunnerResult
-from secscan.sync import SyncResult, sync
+from security_scan.config import Config, ConfigError, load_config
+from security_scan.detect import DetectionResult, ScannerTarget, detect_stack
+from security_scan.github import GitHub, GitHubError
+from security_scan.models import Finding
+from security_scan.normalize import normalize_sarif
+from security_scan.notify import post_digest
+from security_scan.runners import RunnerResult
+from security_scan.sync import SyncResult, sync
 
 
 def cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="secscan",
+        prog="security_scan",
         description="Stateless single-repo security scanner; files findings into a GitHub Projects v2 board.",
     )
     parser.add_argument("--config", required=True, help="Path to config.yaml")
@@ -45,7 +45,7 @@ def cli(argv: list[str] | None = None) -> int:
 
 
 def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_work: bool = False) -> int:
-    work_root = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="secscan-"))
+    work_root = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="security_scan-"))
     repo_dir = work_root / cfg.repo_name
 
     gh = GitHub(cfg.github_token, cfg.repo_owner, cfg.repo_name, dry_run=dry_run)
@@ -83,7 +83,7 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         if (cfg.cross_validate.enabled
                 and "codex" in completed_scanners
                 and "gemma" in completed_scanners):
-            from secscan.cross_validate import cross_validate
+            from security_scan.cross_validate import cross_validate
             before = sum(1 for f in findings if f.scanner in ("codex", "gemma"))
             print(f"cross-validate: reviewing {before} LLM finding(s) bidirectionally", file=sys.stderr)
             cross_validate(
@@ -195,7 +195,7 @@ def _scan_and_normalize(
 
 def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules: Path | str | None) -> RunnerResult:
     """Dynamically import the runner so missing optional bits never block import-time."""
-    mod = importlib.import_module(f"secscan.runners.{t.scanner}")
+    mod = importlib.import_module(f"security_scan.runners.{t.scanner}")
     if t.scanner == "osv":
         return mod.run(t.targets[0], exclude=cfg.paths.exclude)
     if t.scanner == "gitleaks":
@@ -300,7 +300,7 @@ def _maybe_triage(cfg: Config):
         return None
     try:
         # Lazy import to avoid touching `requests` when triage is off.
-        from secscan.triage import Triage
+        from security_scan.triage import Triage
         t = Triage(cfg.triage)
         # Kick off model warm-up in the background; scans run in parallel.
         t.start_warmup()

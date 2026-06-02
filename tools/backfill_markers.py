@@ -1,9 +1,9 @@
-"""One-time backfill: add secscan markers to sub-issues filed by an earlier tool.
+"""One-time backfill: add security_scan markers to sub-issues filed by an earlier tool.
 
 Reads marker-less sub-issues under a parent issue, parses the ezel_scan format
 (or a compatible one) to recover (rule_id, file_path, category), computes
-secscan's fingerprint, and PATCHes the body to inject the marker. Future
-`secscan run` invocations then dedup correctly against these issues.
+security_scan's fingerprint, and PATCHes the body to inject the marker. Future
+`security_scan run` invocations then dedup correctly against these issues.
 
 Usage:
     python tools/backfill_markers.py --owner leverj --repo ezel --parent 451 \\
@@ -27,8 +27,8 @@ import requests
 
 # Allow running this from the repo root with `-m` or as a script.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from secscan.fingerprint import compute_fingerprint, inject_marker, parse_marker
-from secscan.models import Finding
+from security_scan.fingerprint import compute_fingerprint, inject_marker, parse_marker
+from security_scan.models import Finding
 
 _API = "https://api.github.com"
 
@@ -120,7 +120,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--parent", type=int, required=True)
     ap.add_argument("--work-prefix", default="file:///work/ezel",
-                    help="Path prefix that matches what secscan/osv-scanner emit "
+                    help="Path prefix that matches what security_scan/osv-scanner emit "
                          "(e.g. file:///work/<repo-name>).")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -135,7 +135,7 @@ def main() -> int:
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "secscan-backfill/0.1",
+        "User-Agent": "security_scan-backfill/0.1",
     })
 
     print(f"listing sub-issues of {args.owner}/{args.repo}#{args.parent} ...", file=sys.stderr)

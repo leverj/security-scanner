@@ -1,8 +1,8 @@
 name: Publish image
 
-# Builds and publishes the secscan image to Docker Hub on every tag named v*.
+# Builds and publishes the security-scan image to Docker Hub on every tag named v*.
 # The tag must match the [project.version] in pyproject.toml and the
-# `version:` in SECSCAN-MANIFEST.yaml (a guard step verifies this).
+# `version:` in SECURITY-SCAN-MANIFEST.yaml (a guard step verifies this).
 #
 # Required repository secrets:
 #   DOCKERHUB_USERNAME   the Docker Hub user/org that owns leverj/security-scan
@@ -56,7 +56,7 @@ jobs:
       - name: Verify version alignment
         run: |
           py_version=$(grep -E '^version\s*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          mf_version=$(grep -E '^version:' SECSCAN-MANIFEST.yaml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          mf_version=$(grep -E '^version:' SECURITY-SCAN-MANIFEST.yaml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           want='${{ steps.tag.outputs.version }}'
 
           echo "tag=$want  pyproject=$py_version  manifest=$mf_version"
@@ -66,7 +66,7 @@ jobs:
             exit 1
           fi
           if [[ "$mf_version" != "$want" ]]; then
-            echo "::error::SECSCAN-MANIFEST.yaml version ($mf_version) != tag ($want). Bump the manifest or fix the tag." >&2
+            echo "::error::SECURITY-SCAN-MANIFEST.yaml version ($mf_version) != tag ($want). Bump the manifest or fix the tag." >&2
             exit 1
           fi
 
@@ -95,4 +95,4 @@ jobs:
         run: |
           docker run --rm --entrypoint cat \
             "${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}" \
-            /app/SECSCAN-MANIFEST.yaml | head -5
+            /app/SECURITY-SCAN-MANIFEST.yaml | head -5
