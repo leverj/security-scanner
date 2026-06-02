@@ -122,6 +122,127 @@ cmd_build() {
   echo "done: $IMAGE"
 }
 
+# read_version_from <file> <regex>
+# Pulls the first match of <regex> from <file>, returns just the captured version.
+read_version_from() {
+  local file="$1" pattern="$2"
+  [[ -f "$file" ]] || die "missing file: $file"
+  grep -E "$pattern" "$file" | head -1 | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+cmd_publish() {
+  command -v docker >/dev/null || die "docker not on PATH"
+
+  local tag=""
+  local push=1
+  local multi_arch=1
+  local repo="leverj/security-scan"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-push)      push=0; shift ;;
+      --single-arch)  multi_arch=0; shift ;;
+      --repo)         repo="$2"; shift 2 ;;
+      --repo=*)       repo="${1#--repo=}"; shift ;;
+      v[0-9]*|[0-9]*) tag="$1"; shift ;;
+      -h|--help)
+        cat <<EOH
+usage: ./security-scan.sh publish [vX.Y.Z] [--no-push] [--single-arch] [--repo <user/image>]
+
+Build and push the docker image to Docker Hub. Assumes you've already run
+\`docker login\` in this shell (push uses the existing credentials).
+
+  vX.Y.Z          override the tag. Default: derived from SECURITY-SCAN-MANIFEST.yaml
+                  (with a 'v' prefix). When omitted, the script verifies that
+                  pyproject.toml's version matches the manifest's.
+
+  --no-push       build + tag locally; do NOT push. Useful to dry-run a release.
+  --single-arch   build only for the host architecture (skip multi-arch buildx).
+                  Default: linux/amd64 + linux/arm64.
+  --repo          override the image repo. Default: leverj/security-scan.
+EOH
+        return 0 ;;
+      *) die "publish: unknown argument: $1 (try --help)" ;;
+    esac
+  done
+
+  # Resolve the tag.
+  if [[ -z "$tag" ]]; then
+    local py_version mf_version
+    py_version="$(read_version_from "$HERE/pyproject.toml" '^version\s*=')"
+    mf_version="$(read_version_from "$HERE/SECURITY-SCAN-MANIFEST.yaml" '^version:')"
+    if [[ -z "$py_version" || -z "$mf_version" ]]; then
+      die "could not read version from pyproject.toml or SECURITY-SCAN-MANIFEST.yaml"
+    fi
+    if [[ "$py_version" != "$mf_version" ]]; then
+      die "version mismatch — pyproject.toml: $py_version  vs  manifest: $mf_version. Align them, then re-run."
+    fi
+    tag="v$py_version"
+    echo "publish: resolved tag $tag from pyproject.toml + manifest"
+  else
+    echo "publish: using explicit tag $tag (skipping version-alignment check)"
+  fi
+
+  # Sanity: the version-stripped tag should match what's in the manifest if no override.
+  local image_versioned="$repo:$tag"
+  local image_latest="$repo:latest"
+
+  if (( multi_arch )); then
+    if ! docker buildx version >/dev/null 2>&1; then
+      die "docker buildx not available — pass --single-arch, or set up buildx (https://docs.docker.com/build/architecture/)"
+    fi
+    # Ensure a builder that supports multi-platform exists / is current.
+    local builder; builder="$(docker buildx inspect --bootstrap 2>/dev/null | grep -E '^Name:' | head -1 | awk '{print $2}')"
+    echo "publish: using buildx builder: ${builder:-default}"
+  fi
+
+  local plat_msg="host-only" push_msg="no (--no-push)"
+  (( multi_arch )) && plat_msg="linux/amd64,linux/arm64"
+  (( push )) && push_msg="yes"
+  echo
+  echo "  repo:      $repo"
+  echo "  tags:      $tag, latest"
+  echo "  platforms: $plat_msg"
+  echo "  push:      $push_msg"
+  echo
+
+  if (( push )); then
+    # Confirm a real publish.
+    read -r -p "publish $image_versioned + $image_latest to Docker Hub? [yes/no] " ans
+    [[ "$ans" == "yes" ]] || { echo "aborted."; return 1; }
+  fi
+
+  if (( multi_arch )); then
+    # `--load` doesn't support multi-arch (single-image local load only); for
+    # --no-push we just build to the buildx cache without exporting, which still
+    # exercises the full build and proves it would push cleanly.
+    local export_args=()
+    (( push )) && export_args=(--push)
+    docker buildx build \
+      --platform linux/amd64,linux/arm64 \
+      -t "$image_versioned" \
+      -t "$image_latest" \
+      "${export_args[@]}" \
+      "$HERE"
+  else
+    docker build -t "$image_versioned" -t "$image_latest" "$HERE"
+    if (( push )); then
+      docker push "$image_versioned"
+      docker push "$image_latest"
+    fi
+  fi
+
+  echo
+  if (( push )); then
+    echo "published: $image_versioned + $image_latest"
+    # Smoke-test the manifest is readable from the just-pushed tag.
+    echo "smoke test: extracting manifest from the pushed image..."
+    docker run --rm --entrypoint cat "$image_versioned" /app/SECURITY-SCAN-MANIFEST.yaml | head -5
+  else
+    echo "built locally (not pushed): $image_versioned + $image_latest"
+  fi
+}
+
 cmd_check() {
   local config_dir="${SECURITY_SCAN_CONFIG_DIR:-$DEFAULT_CONFIG_DIR}"
   local config="${SECURITY_SCAN_CONFIG:-$config_dir/config.yaml}"
@@ -375,20 +496,24 @@ EOF
 }
 
 case "${1:-}" in
-  build) shift; cmd_build "$@" ;;
-  run)   shift; cmd_run "$@" ;;
-  check) shift; cmd_check "$@" ;;
+  build)   shift; cmd_build "$@" ;;
+  run)     shift; cmd_run "$@" ;;
+  check)   shift; cmd_check "$@" ;;
+  publish) shift; cmd_publish "$@" ;;
   ""|-h|--help)
     cat <<EOF
-security-scan.sh — build/run the security-scan container
+security-scan.sh — build/run/publish the security-scan container
 
 usage:
   ./security-scan.sh build
   ./security-scan.sh run [--config path/to/config.yaml]
-                   [--config-dir path/to/config_dir]
-                   [--dry-run|--no-dry-run]
-                   [extra security-scan args...]
+                         [--config-dir path/to/config_dir]
+                         [--dry-run|--no-dry-run]
+                         [extra security-scan args...]
   ./security-scan.sh check
+  ./security-scan.sh publish [vX.Y.Z] [--no-push] [--single-arch] [--repo user/img]
+                         # builds + pushes multi-arch to Docker Hub.
+                         # Run \`docker login\` first; uses your existing creds.
 
 defaults:
   --dry-run is added unless you pass --no-dry-run
@@ -415,5 +540,5 @@ slack (driven by config.yaml):
 Run \`./security-scan.sh check\` for a full setup status.
 EOF
     ;;
-  *) die "unknown command: $1 (try 'build', 'run', or 'check')" ;;
+  *) die "unknown command: $1 (try 'build', 'run', 'check', or 'publish')" ;;
 esac
