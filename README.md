@@ -218,6 +218,27 @@ version is available (the image ships a `SECURITY-SCAN-MANIFEST.yaml` describing
 its version + any config fields the skill should add to your local
 `config.yaml`).
 
+## Redaction before remote LLMs
+
+The Codex SAST scanner, the Gemma SAST scanner, and the cross-validation step
+all hand source-derived content (snippets, file contents, finding messages) to
+external models. Before any of that leaves the box:
+
+- Known-token shapes are rewritten — AWS keys, GitHub tokens/PATs, Stripe,
+  Slack, Google API, OpenAI/Anthropic-style `sk-…`, JWTs, PEM blocks, and
+  `NAME=value` assignments where `NAME` is a secret-shaped key.
+- High-Shannon-entropy substrings (≥ 4.0 over ≥ 20 chars) are rewritten to
+  `<REDACTED:high-entropy>`.
+- For Gemma (Ollama) and the Gemma direction of cross-validation, the scanner
+  refuses to send anything at all if `base_url` doesn't resolve to loopback or
+  RFC1918. Same for `triage.base_url` — if set to a non-local host, triage is
+  disabled at construction time.
+
+This is defence-in-depth: it lets cross-validation and Codex SAST run with
+substantially less risk of leaking real production credentials hardcoded in
+source. The list isn't exhaustive — treat the scanned repo as trusted code
+you're auditing, not as adversarial input.
+
 ## Spec
 
 See [security-scan-spec.md](security-scan-spec.md) for the full design.

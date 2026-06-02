@@ -40,6 +40,7 @@ from pathlib import Path
 import requests
 
 from security_scan.models import SEVERITY_ORDER, Finding
+from security_scan.redact import is_local_url, redact_text
 
 # Severity downgrade ladder. Critical is intentionally NOT downgraded — the
 # asymmetry is deliberate (worst case for FP-on-critical is one extra issue
@@ -98,7 +99,19 @@ def cross_validate(
         return findings
 
     codex_available = shutil.which(codex_binary) is not None
-    gemma_reachable = _ping_ollama(ollama_url)
+    # Defence-in-depth: even though redact_text scrubs known-token shapes from
+    # snippets, refuse to use the Gemma direction at all if base_url isn't
+    # local. Cross-validation pays out at the margin; sending source to a
+    # remote LLM does not.
+    if not is_local_url(ollama_url):
+        print(
+            f"cross-validate: gemma validator skipped — ollama_url {ollama_url!r} "
+            "is not loopback/private",
+            file=sys.stderr,
+        )
+        gemma_reachable = False
+    else:
+        gemma_reachable = _ping_ollama(ollama_url)
 
     for f in findings:
         if f.scanner == "codex" and gemma_reachable:
@@ -151,7 +164,7 @@ def _gemma_verdict(
     snippet = _read_snippet(repo_dir, f.file_path, f.line) or (f.extra or {}).get("snippet", "")
     prompt = _REVIEW_PROMPT.format(
         finding_json=json.dumps(_finding_summary(f), indent=2),
-        snippet=(str(snippet)[:1200] or "(unavailable)"),
+        snippet=redact_text(str(snippet)[:1200]) or "(unavailable)",
     )
     try:
         r = requests.post(
@@ -183,9 +196,10 @@ def _codex_verdict(
     f: Finding, *, repo_dir: Path, binary: str, model: str | None, timeout: int,
 ) -> tuple[str, str]:
     snippet = _read_snippet(repo_dir, f.file_path, f.line) or (f.extra or {}).get("snippet", "")
+    # Codex is a cloud LLM (ChatGPT subscription) — always redact before send.
     prompt = _REVIEW_PROMPT.format(
         finding_json=json.dumps(_finding_summary(f), indent=2),
-        snippet=(str(snippet)[:1200] or "(unavailable)"),
+        snippet=redact_text(str(snippet)[:1200]) or "(unavailable)",
     )
     with tempfile.TemporaryDirectory(prefix="codex-validate-") as td:
         schema = Path(td) / "schema.json"
@@ -237,7 +251,8 @@ def _codex_verdict(
 
 def _finding_summary(f: Finding) -> dict:
     """The factual fields we hand to a validator. NEVER include raw secrets — the
-    Finding model masks those already, but be defensive."""
+    Finding model masks those already, but be defensive. We also run `message`
+    through `redact_text` since some scanner messages echo the matched value."""
     return {
         "scanner": f.scanner,
         "category": f.category,
@@ -246,7 +261,7 @@ def _finding_summary(f: Finding) -> dict:
         "file": f.file_path,
         "line": f.line,
         "title": f.title,
-        "message": f.message,
+        "message": redact_text(f.message or ""),
         "masked_preview": f.masked_preview,
     }
 

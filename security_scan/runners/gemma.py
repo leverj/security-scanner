@@ -23,6 +23,8 @@ from pathlib import Path
 
 import requests
 
+from security_scan.redact import is_local_url, redact_text
+
 from . import RunnerResult
 
 # Extensions worth feeding to the model. Mirrors security_scan/detect._SEMGREP_EXTS with
@@ -104,6 +106,13 @@ def run(
     with a short error string. Like every other runner, partial failure contributes
     zero findings — never blanket "all clear".
     """
+    if not is_local_url(base_url):
+        return RunnerResult(
+            "gemma", None, False,
+            f"refusing to send source to non-local Ollama at {base_url!r}; "
+            "set gemma.base_url to a loopback/private host",
+        )
+
     files = _select_files(repo_dir, exclude or [], max_files, max_file_bytes, max_total_bytes)
     if not files:
         # Empty repo or all files filtered out — treat as a no-op success.
@@ -239,9 +248,13 @@ def _build_user_prompt(files: Iterable[tuple[str, str]], repo_dir: Path) -> str:
     # files might be a generator above; re-list to iterate twice
     file_list = list(files)
     parts[1] = f"Files to review: {len(file_list)}"
+    # Redact known-token shapes + high-entropy substrings from every file body
+    # before the prompt leaves the box. Even though Ollama is meant to be local,
+    # defence-in-depth: if someone points base_url at a remote host (or proxies
+    # traffic), hardcoded credentials shouldn't slip out of source files.
     for rel, content in file_list:
         parts.append(f"===== FILE: {rel} =====")
-        parts.append(content)
+        parts.append(redact_text(content))
         parts.append("")
     parts.append("Return JSON only.")
     return "\n".join(parts)
