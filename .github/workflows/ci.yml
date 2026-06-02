@@ -36,7 +36,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check security-scan/ tests/
+        run: ruff check security_scan/ tests/
 
       - name: Tests (pytest)
         run: pytest -q
