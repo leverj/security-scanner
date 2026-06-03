@@ -135,17 +135,19 @@ cmd_publish() {
 
   local push=1
   local multi_arch=1
+  local assume_yes=0
   local repo="leverj/security-scan"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --no-push)      push=0; shift ;;
       --single-arch)  multi_arch=0; shift ;;
+      -y|--yes)       assume_yes=1; shift ;;
       --repo)         repo="$2"; shift 2 ;;
       --repo=*)       repo="${1#--repo=}"; shift ;;
       -h|--help)
         cat <<EOH
-usage: ./security-scan.sh publish [--no-push] [--single-arch] [--repo <user/image>]
+usage: ./security-scan.sh publish [--no-push] [--single-arch] [--yes] [--repo <user/image>]
 
 Build and push the docker image to Docker Hub as :latest. Assumes you've
 already run \`docker login\` in this shell (push uses the existing creds).
@@ -159,6 +161,8 @@ version matches the manifest's before publishing).
   --no-push       build only; do NOT push. Useful to dry-run a release.
   --single-arch   build only for the host architecture (skip multi-arch buildx).
                   Default: linux/amd64 + linux/arm64.
+  --yes, -y       skip the "publish to Docker Hub?" confirmation (for scripted
+                  / non-interactive runs). Default: prompt before pushing.
   --repo          override the image repo. Default: leverj/security-scan.
 EOH
         return 0 ;;
@@ -200,7 +204,7 @@ EOH
   echo "  push:      $push_msg"
   echo
 
-  if (( push )); then
+  if (( push )) && (( ! assume_yes )); then
     read -r -p "publish $image_latest to Docker Hub? [yes/no] " ans
     [[ "$ans" == "yes" ]] || { echo "aborted."; return 1; }
   fi

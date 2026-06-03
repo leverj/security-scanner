@@ -221,7 +221,8 @@ def test_osv_does_not_pass_paths_to_ignore(tmp_path: Path):
         osv_runner.run(tmp_path, exclude=["vendor/", "archive/"])
     cmd = m.call_args.args[0]
     assert "--paths-to-ignore" not in cmd
-    assert "--skip-git" in cmd
+    assert "--skip-git" not in cmd          # removed in osv-scanner v2
+    assert cmd[1:3] == ["scan", "source"]   # v2 subcommand form
     assert "--recursive" in cmd
 
 

@@ -14,7 +14,10 @@ def run(root: Path, exclude: list[str] | None = None, binary: str = "osv-scanner
     # security_scan.normalize.normalize_sarif() filters excluded paths post-hoc, so we
     # get the same effect with zero version coupling.
     _ = exclude  # accepted for signature stability; intentionally unused here
-    cmd = [binary, "--format", "sarif", "--skip-git", "--recursive"]
+    # osv-scanner v2 dropped the legacy top-level `osv-scanner <flags> <path>` form in
+    # favour of the `scan source` subcommand, and removed --skip-git (v2 already skips
+    # the git root by default — the opt-in is now the inverse, --include-git-root).
+    cmd = [binary, "scan", "source", "--format", "sarif", "--recursive"]
     cmd.append(str(root))
 
     try:
