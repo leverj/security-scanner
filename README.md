@@ -114,10 +114,160 @@ and never commit your filled-in copy.
 
 ### Option C — Docker secrets / CI
 
-For container orchestrators (Docker Swarm, K8s, GitHub Actions, etc.), populate
-`GITHUB_TOKEN` (and friends) via your platform's secret mechanism so it appears
-in the container's environment. With `secrets.source: env`, `security-scan.sh` (or a
-direct `docker run`) will pick it up.
+For container orchestrators (Docker Swarm, K8s, GitHub Actions, CircleCI, etc.),
+populate `GITHUB_TOKEN` (and friends) via your platform's secret mechanism so it
+appears in the container's environment. With `secrets.source: env`,
+`security-scan.sh` (or a direct `docker run`) will pick it up.
+
+---
+
+## How to run
+
+Three supported integration paths. All three invoke the same image
+(`leverj/security-scan:latest`) with the same `config.yaml`. The choice is
+about where the scan runs, not what it does.
+
+| Path | Use when | Cost |
+|---|---|---|
+| **CLI** (`docker run` from your laptop) | Ad-hoc / one-off scans, debugging config | Free |
+| **GitHub Actions** | The target repo lives on GitHub and you want the scan in CI | Free on public repos; ~$0.04/run on private (covered by free tier for most teams) |
+| **CircleCI** | You already run CI on CircleCI (e.g. iOS pipeline on a self-hosted Mac) | Whatever your CircleCI plan charges; $0 on self-hosted runners |
+
+For all paths you need:
+
+- A GitHub PAT with `repo` + `project` scopes (the auto-provisioned
+  `GITHUB_TOKEN` in GitHub Actions does NOT have `project` scope — use a
+  user/org PAT stored in repo secrets).
+- A `config.yaml` in your target repo (typical location: `.security-scan/config.yaml`).
+- A GitHub Projects v2 board the PAT can write to.
+
+### CLI
+
+Run from anywhere with Docker + the PAT in your shell:
+
+```bash
+export GITHUB_TOKEN="ghp_..."        # PAT with repo + project scopes
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."   # optional
+
+# A) Scan a repo you've already checked out (fast — no clone)
+docker run --rm \
+  -v "$PWD/.security-scan:/config:ro" \
+  -v "$PWD:/work" \
+  -e GITHUB_TOKEN -e SLACK_WEBHOOK_URL \
+  leverj/security-scan:latest \
+  --repo-dir /work
+
+# B) Clone fresh from cfg.repo@cfg.ref (default behavior)
+docker run --rm \
+  -v "$PWD/.security-scan:/config:ro" \
+  -e GITHUB_TOKEN -e SLACK_WEBHOOK_URL \
+  leverj/security-scan:latest
+```
+
+Add `--dry-run` to the args list to scan + normalize without filing anything.
+
+Pin by digest in scripts so a fresh `:latest` push can't surprise you mid-run:
+
+```bash
+DIGEST=$(docker manifest inspect leverj/security-scan:latest | jq -r '.manifests[0].digest')
+docker run ... "leverj/security-scan@${DIGEST}" --repo-dir /work
+```
+
+### GitHub Actions (self-hosted Mac mini or github-hosted Linux)
+
+Drop this into `.github/workflows/security-scan.yml` in the target repo:
+
+```yaml
+name: security-scan
+
+on:
+  schedule:
+    - cron: '0 9 * * *'        # 02:00 PT daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    # github-hosted: runs-on: ubuntu-latest
+    # self-hosted Mac mini:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # gitleaks/trufflehog scan full history
+
+      - name: Run security-scan
+        env:
+          GITHUB_TOKEN:      ${{ secrets.SECURITY_SCAN_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          docker pull -q leverj/security-scan:latest
+          docker run --rm \
+            -v "$PWD/.security-scan:/config:ro" \
+            -v "$PWD:/work" \
+            -e GITHUB_TOKEN -e SLACK_WEBHOOK_URL \
+            leverj/security-scan:latest \
+            --repo-dir /work
+```
+
+Repo secrets to set: `SECURITY_SCAN_TOKEN` (the PAT),
+`SLACK_WEBHOOK_URL` (optional).
+
+### CircleCI (self-hosted Mac mini)
+
+Drop this into `.circleci/config.yml` in the target repo:
+
+```yaml
+version: 2.1
+
+jobs:
+  security-scan:
+    machine: true
+    resource_class: leverj/mac-mini    # your registered self-hosted runner
+    steps:
+      - checkout
+      - run:
+          name: Run security-scan
+          command: |
+            docker pull -q leverj/security-scan:latest
+            docker run --rm \
+              -v "${PWD}/.security-scan:/config:ro" \
+              -v "${PWD}:/work" \
+              -e GITHUB_TOKEN -e SLACK_WEBHOOK_URL \
+              leverj/security-scan:latest \
+              --repo-dir /work
+          environment:
+            GITHUB_TOKEN:      $SECURITY_SCAN_TOKEN
+            SLACK_WEBHOOK_URL: $SLACK_WEBHOOK_URL
+
+workflows:
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 9 * * *"        # 02:00 PT daily
+          filters:
+            branches:
+              only: [main]
+    jobs: [security-scan]
+```
+
+Project env vars to set in CircleCI: `SECURITY_SCAN_TOKEN`,
+`SLACK_WEBHOOK_URL` (optional).
+
+Self-hosted Mac mini setup (applies to both GitHub Actions and CircleCI):
+
+- Docker Desktop running + auto-start on login.
+- Prevent sleep when plugged in (or `caffeinate -dimsu` in a launchd plist).
+- Single runner = one job at a time — pick a cron hour the iOS pipeline is idle.
+- Disk hygiene: `docker system prune -af --filter "until=720h"` weekly to bound image cache growth.
 
 ---
 
