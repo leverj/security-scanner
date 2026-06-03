@@ -27,13 +27,14 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.4.0"
+version: "0.4.1"
 config_schema_version: 4
 docker_image: "leverj/security-scan"
 released: "2026-06-03"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
+  - "0.4.1: add `--repo-dir <path>` CLI flag that scans an existing directory in-place, skipping the `gh clone` step. Intended for the upcoming GitHub Action wrapper where the runner has already done `actions/checkout`. The user-supplied directory is never deleted — `--keep-work` is implicit when `--repo-dir` is set. No config-schema change."
   - "BREAKING (0.4.0): LLM SAST lanes (codex, gemma, cross-validation, gemma-driven triage prose/intro/fuzzy-dup) removed from the container. They now live in a host-side companion tool `security-scan-llm` (shipped via the `leverj/ai-skills` plugin under `tools/security-scan-llm/`). Reason: both lanes have host-side dependencies (codex CLI subscription, host Ollama) that can't transport into a container. The container is now deterministic-only, suitable for a CI-friendly GitHub Action. Both substrates file into the same Projects v2 board with a byte-identical fingerprint scheme, so findings dedup across runs."
   - "0.3.3: fix image-scan lane failing under the non-root scanner user. The Dockerfile previously left /var/cache/trivy with `chmod a+rX` (read-only for non-root); `trivy image` needs to create a `fanal/` subdir there for layer caching and was failing with `permission denied` on every base-image scan. Replaced with `chown -R 1000:1000`. v0.3.2's image-scan lane was effectively non-functional; v0.3.3 restores it."
   - "0.3.2: image-scan follow-ups (issue #14, from codex peer review). Fingerprint now includes image_ref so the same CVE in two different base images files as two distinct issues instead of one suppressing the other. Bare base names (`alpine`, `nginx`, `redis`, etc.) are recognized — previously dropped as if they were stage aliases. `paths.exclude` now suppresses Dockerfile discovery (vendored copies no longer trigger image pulls). Mutually-exclusive `built_image.ref` + `build_locally` raises ValueError at config-load time. Exit code 3 now fires when only image_scan or supabase lanes are enabled and all fail."

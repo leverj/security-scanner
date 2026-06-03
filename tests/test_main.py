@@ -251,3 +251,41 @@ def test_severity_floor_skips_low_findings(tmp_path):
     assert rc == 0
     # only OSV's GHSA-aaaa has CVSS 9.8 = critical; gitleaks and semgrep are high
     assert fake_gh.create_issue.call_count == 1
+
+
+def test_repo_dir_skips_clone_and_preserves_directory(tmp_path):
+    """When --repo-dir is set, run() must NOT call gh.clone() and must NOT
+    delete the user-supplied directory after the scan."""
+    from security_scan.main import run
+
+    user_tree = tmp_path / "my-checked-out-repo"
+    _populate_synthetic_repo(user_tree)
+    sentinel = user_tree / ".sentinel-keep-me"
+    sentinel.write_text("the runner must never delete this")
+
+    cfg = _cfg(tmp_path)
+    fake_gh = _fresh_gh(dry_run=False)
+
+    with patch("security_scan.main.GitHub", return_value=fake_gh), \
+         patch("security_scan.runners.osv.run", return_value=RunnerResult("osv", _osv_sarif(), True)), \
+         patch("security_scan.runners.gitleaks.run", return_value=RunnerResult("gitleaks", _gitleaks_sarif(), True)), \
+         patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _semgrep_sarif(), True)):
+        rc = run(cfg, dry_run=False, repo_dir=str(user_tree))
+
+    assert rc == 0
+    fake_gh.clone.assert_not_called()
+    assert user_tree.exists(), "user-supplied --repo-dir must NEVER be deleted"
+    assert sentinel.exists(), "files inside --repo-dir must be left alone"
+
+
+def test_repo_dir_nonexistent_returns_config_error(tmp_path):
+    from security_scan.main import run
+
+    cfg = _cfg(tmp_path)
+    fake_gh = _fresh_gh(dry_run=True)
+
+    with patch("security_scan.main.GitHub", return_value=fake_gh):
+        rc = run(cfg, dry_run=True, repo_dir=str(tmp_path / "does-not-exist"))
+
+    assert rc == 2
+    fake_gh.clone.assert_not_called()
