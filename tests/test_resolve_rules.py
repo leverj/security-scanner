@@ -14,7 +14,6 @@ from security_scan.config import (
     ProjectConfig,
     ScannersConfig,
     SlackConfig,
-    TriageConfig,
 )
 from security_scan.main import _has_rule_files, _resolve_semgrep_rules
 
@@ -27,7 +26,6 @@ def _cfg(rules=None):
         scanners=ScannersConfig(),
         paths=PathsConfig(),
         severity_floor="low",
-        triage=TriageConfig(),
         slack=SlackConfig(),
         semgrep_rules_dir=rules,
     )

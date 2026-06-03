@@ -218,26 +218,26 @@ version is available (the image ships a `SECURITY-SCAN-MANIFEST.yaml` describing
 its version + any config fields the skill should add to your local
 `config.yaml`).
 
-## Redaction before remote LLMs
+## LLM SAST (companion tool)
 
-The Codex SAST scanner, the Gemma SAST scanner, and the cross-validation step
-all hand source-derived content (snippets, file contents, finding messages) to
-external models. Before any of that leaves the box:
+LLM SAST (Codex + Gemma with bidirectional cross-validation) **does not** ship
+in this container. It moved to a host-side companion tool that lives in the
+[leverj/ai-skills](https://github.com/leverj/ai-skills) plugin under
+`tools/security-scan-llm/`.
 
-- Known-token shapes are rewritten — AWS keys, GitHub tokens/PATs, Stripe,
-  Slack, Google API, OpenAI/Anthropic-style `sk-…`, JWTs, PEM blocks, and
-  `NAME=value` assignments where `NAME` is a secret-shaped key.
-- High-Shannon-entropy substrings (≥ 4.0 over ≥ 20 chars) are rewritten to
-  `<REDACTED:high-entropy>`.
-- For Gemma (Ollama) and the Gemma direction of cross-validation, the scanner
-  refuses to send anything at all if `base_url` doesn't resolve to loopback or
-  RFC1918. Same for `triage.base_url` — if set to a non-local host, triage is
-  disabled at construction time.
+Why split: `codex` is a CLI tied to the user's ChatGPT/Codex login; `gemma`
+talks to a local Ollama daemon. Neither resource is reachable from inside the
+container, so making the LLM lanes a host concern keeps the container
+deterministic + CI-friendly while preserving the LLM coverage for developers
+running locally. Both substrates file into the **same** Projects v2 board with
+a **byte-identical** fingerprint scheme; findings dedup across runs.
 
-This is defence-in-depth: it lets cross-validation and Codex SAST run with
-substantially less risk of leaking real production credentials hardcoded in
-source. The list isn't exhaustive — treat the scanned repo as trusted code
-you're auditing, not as adversarial input.
+Install:
+
+```bash
+pipx install <ai-skills-clone>/tools/security-scan-llm
+security-scan-llm --config /path/to/config.yaml --repo-dir .
+```
 
 ## Spec
 

@@ -41,7 +41,6 @@ project:
 scanners: {osv: false, gitleaks: true, semgrep: false}
 paths: {exclude: ["a/", "b/"]}
 severity_floor: "high"
-triage: {enabled: true, model: "gemma4:9b"}
 slack: {enabled: true, webhook_url_env: "SLACK_WEBHOOK_URL"}
 """)
     cfg = load_config(p)
@@ -49,8 +48,6 @@ slack: {enabled: true, webhook_url_env: "SLACK_WEBHOOK_URL"}
     assert cfg.scanners.semgrep is False
     assert cfg.paths.exclude == ["a/", "b/"]
     assert cfg.severity_floor == "high"
-    assert cfg.triage.enabled is True
-    assert cfg.triage.model == "gemma4:9b"
     assert cfg.slack.enabled is True
     assert cfg.project.owner == "owner"
     assert cfg.project.number == 1

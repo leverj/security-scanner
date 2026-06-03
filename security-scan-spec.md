@@ -1,16 +1,27 @@
 # security-scan — Architecture & Build Spec (v2)
 
+> **Note (v0.4.0):** the Codex + Gemma LLM SAST lanes, their bidirectional
+> cross-validation, and the Gemma-driven triage (prose/intro/fuzzy-dup) have
+> been **removed from this container**. They live in a host-side companion
+> tool, [`security-scan-llm`](https://github.com/leverj/ai-skills/tree/master/tools/security-scan-llm),
+> shipped via the `leverj/ai-skills` plugin. The container itself is now
+> deterministic-only and suitable for a CI-friendly GitHub Action. Sections
+> below that describe LLM runners, cross-validation, or Gemma triage describe
+> behavior that now applies to `security-scan-llm`, not to this container.
+> Both substrates file into the same GitHub Projects v2 board with a
+> byte-identical fingerprint scheme.
+
 A single‑repo, stateless, self‑hosted security scanner that detects a repo's tech stack,
 runs the right scanners, and files each finding as a deduplicated issue into a user‑provided
-**GitHub Projects v2 board**. Optional local‑LLM (Gemma 4) and cloud‑LLM (Codex) SAST lanes
-with bidirectional cross‑validation. Distributed as a Docker image (`leverj/security-scan`)
+**GitHub Projects v2 board**. Distributed as a Docker image (`leverj/security-scan`)
 with a baked‑in manifest that lets consumers (e.g. the `leverj/ai-skills` skill) do
 user‑confirmed version upgrades with automated config migration. Closing / fixing findings
 is **out of scope** — another system owns that.
 
-v1 of this spec described a parent‑epic + sub‑issue model. v2 (this document) replaces that
-with a flat Projects v2 board (no sub‑issue tree), adds Codex + Gemma LLM SAST + cross‑validation,
-and adds the image manifest contract.
+v1 of this spec described a parent‑epic + sub‑issue model. v2 replaces that
+with a flat Projects v2 board (no sub‑issue tree) and adds the image manifest contract.
+v0.4.0 (current) moves the LLM SAST lanes out of the container into the
+`security-scan-llm` companion tool.
 
 ---
 

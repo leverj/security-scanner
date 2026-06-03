@@ -23,7 +23,6 @@ from security_scan.config import (
     ProjectConfig,
     ScannersConfig,
     SlackConfig,
-    TriageConfig,
 )
 from security_scan.fingerprint import parse_marker, resolve_fingerprint
 from security_scan.github import ProjectContext, ProjectField
@@ -134,7 +133,6 @@ def cfg(tmp_path):
         scanners=ScannersConfig(osv=True, gitleaks=True, semgrep=True),
         paths=PathsConfig(exclude=[]),
         severity_floor="low",
-        triage=TriageConfig(enabled=False),
         slack=SlackConfig(enabled=False),
         semgrep_rules_dir="auto",
     )

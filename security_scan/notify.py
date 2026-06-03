@@ -1,7 +1,7 @@
 """Optional Slack digest. Either webhook URL or chat.postMessage with bot token.
 
-Strictly additive: a Slack failure must never block the run. The deterministic
-summary is computed by code; triage may override the prose if available.
+Strictly additive: a Slack failure must never block the run. The digest is
+computed deterministically from result.created_findings.
 """
 
 from __future__ import annotations
@@ -26,26 +26,12 @@ def post_digest(
     project_owner: str,
     project_number: int,
     digest_text: str | None = None,
-    intro: str | None = None,
 ) -> bool:
-    """Post a Slack message summarizing the run. Returns True on success.
-
-    Two ways callers can influence the message:
-      - `intro` (preferred): a one-line LLM-generated summary that we prepend to
-        the deterministic per-category digest. Structure stays consistent across
-        runs; the LLM only adds color.
-      - `digest_text` (legacy): fully replaces the digest body. Kept for callers
-        that want to entirely override the format.
-    """
+    """Post a Slack message summarizing the run. Returns True on success."""
     if not slack.enabled:
         return False
 
-    if digest_text:
-        text = digest_text
-    else:
-        text = _default_digest(findings, result, repo, ref, project_owner, project_number)
-        if intro:
-            text = f":speech_balloon: _{intro}_\n\n{text}"
+    text = digest_text or _default_digest(findings, result, repo, ref, project_owner, project_number)
 
     try:
         if slack.webhook_url_env:
@@ -94,7 +80,7 @@ _SEV_EMOJI = {
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 _CATEGORY_SECTIONS = [
-    # (category, emoji, label) — ordered by triage priority
+    # (category, emoji, label)
     ("secret-verified", ":key:",                "Secrets (verified live)"),
     ("secret",          ":key:",                "Secrets"),
     ("dependency",      ":shield:",             "Dependencies"),
@@ -140,7 +126,7 @@ def _default_digest(
         # Either truly clean OR everything was dup-skipped/below-floor.
         if result.skipped_dup or result.skipped_floor:
             lines.append(
-                f"_no new findings to triage_ "
+                f"_nothing new to file_ "
                 f"({result.skipped_dup} already filed, {result.skipped_floor} below severity floor)"
             )
         else:

@@ -10,7 +10,6 @@ from security_scan.config import (
     ProjectConfig,
     ScannersConfig,
     SlackConfig,
-    TriageConfig,
 )
 from security_scan.github import ProjectContext, ProjectField
 from security_scan.runners import RunnerResult
@@ -25,7 +24,6 @@ def _cfg(tmp_path, **kw):
         scanners=kw.get("scanners", ScannersConfig(osv=True, gitleaks=True, semgrep=True)),
         paths=kw.get("paths", PathsConfig(exclude=[])),
         severity_floor=kw.get("severity_floor", "low"),
-        triage=kw.get("triage", TriageConfig(enabled=False)),
         slack=kw.get("slack", SlackConfig(enabled=False)),
         semgrep_rules_dir=kw.get("semgrep_rules_dir", "auto"),
     )
