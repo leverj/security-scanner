@@ -27,13 +27,14 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.3.3"
-config_schema_version: 3
+version: "0.4.0"
+config_schema_version: 4
 docker_image: "leverj/security-scan"
 released: "2026-06-03"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
+  - "BREAKING (0.4.0): LLM SAST lanes (codex, gemma, cross-validation, gemma-driven triage prose/intro/fuzzy-dup) removed from the container. They now live in a host-side companion tool `security-scan-llm` (shipped via the `leverj/ai-skills` plugin under `tools/security-scan-llm/`). Reason: both lanes have host-side dependencies (codex CLI subscription, host Ollama) that can't transport into a container. The container is now deterministic-only, suitable for a CI-friendly GitHub Action. Both substrates file into the same Projects v2 board with a byte-identical fingerprint scheme, so findings dedup across runs."
   - "0.3.3: fix image-scan lane failing under the non-root scanner user. The Dockerfile previously left /var/cache/trivy with `chmod a+rX` (read-only for non-root); `trivy image` needs to create a `fanal/` subdir there for layer caching and was failing with `permission denied` on every base-image scan. Replaced with `chown -R 1000:1000`. v0.3.2's image-scan lane was effectively non-functional; v0.3.3 restores it."
   - "0.3.2: image-scan follow-ups (issue #14, from codex peer review). Fingerprint now includes image_ref so the same CVE in two different base images files as two distinct issues instead of one suppressing the other. Bare base names (`alpine`, `nginx`, `redis`, etc.) are recognized — previously dropped as if they were stage aliases. `paths.exclude` now suppresses Dockerfile discovery (vendored copies no longer trigger image pulls). Mutually-exclusive `built_image.ref` + `build_locally` raises ValueError at config-load time. Exit code 3 now fires when only image_scan or supabase lanes are enabled and all fail."
   - "0.3.1: live Supabase Security Advisor lane (epic #4). Optional psycopg-backed scanner that opens a READ-ONLY connection to a project's Postgres and runs vendored Supabase advisor queries (rls_disabled_in_public, security_definer_view, function_search_path_mutable, role usage on unexpected schemas, materialized views in public, auth.users exposure, etc.). Findings get the new `category: config` on the Projects v2 board. Credentials via env: either `url_env` (full DSN) or discrete host/db/user/password env names. The image now installs `psycopg[binary]`; pip users want `pip install security-scan[live]`."
@@ -49,6 +50,9 @@ changelog:
   - "Added bundled Semgrep rules: XSS, SQLi, Supabase migration patterns."
 
 breaking_changes:
+  - id: "llm-lanes-moved-to-host"
+    summary: "Codex + Gemma LLM SAST, bidirectional cross-validation, and Gemma-driven triage (prose/intro/fuzzy-dup) are no longer in the container. They moved to a host-side companion tool, `security-scan-llm`, shipped in the leverj/ai-skills plugin."
+    user_action: "If you used `scanners.codex` or `scanners.gemma` (or `triage.enabled`, `cross_validate.*`): install the host-side tool (`pipx install <ai-skills-clone>/tools/security-scan-llm`), then run `security-scan-llm --config <your-config>` after the container exits. The leverj/ai-skills security-scan skill's Phase 4b already wires this up. The skill will strip the now-removed fields from config.yaml on this upgrade."
   - id: "config-as-directory"
     summary: "The host-side mount target is now the config DIRECTORY, not a single config.yaml file."
     user_action: "Move config.yaml + .env.1password.tpl into a config/ directory and bind-mount that directory at /config:ro."
@@ -147,7 +151,25 @@ config:
       since: 2
       note: "parent_issue (int) -> project (mapping). security-scan no longer files as sub-issues under a parent epic; findings are flat items in a Projects v2 board. The skill should drop parent_issue from the user's config and prompt for project.{owner,number}."
 
-  removed_fields: []
+  removed_fields:
+    - path: "scanners.codex"
+      since: 4
+      note: "LLM SAST lane moved to host-side security-scan-llm tool. The container no longer recognizes this field."
+    - path: "scanners.gemma"
+      since: 4
+      note: "LLM SAST lane moved to host-side security-scan-llm tool. The container no longer recognizes this field."
+    - path: "codex"
+      since: 4
+      note: "Codex tunables block moved to security-scan-llm config (same field names; same defaults)."
+    - path: "gemma"
+      since: 4
+      note: "Gemma SAST tunables block moved to security-scan-llm config (same field names; same defaults)."
+    - path: "cross_validate"
+      since: 4
+      note: "Bidirectional LLM cross-validation moved to security-scan-llm (kicks in automatically when both codex and gemma are enabled there)."
+    - path: "triage"
+      since: 4
+      note: "Gemma-driven triage (prose/intro/fuzzy_dup) moved to security-scan-llm. The deterministic issue body and Slack digest stay in the container."
 
 # Files inside the image worth knowing about (for documentation purposes —
 # skills don't typically need to reach in past the entrypoint).

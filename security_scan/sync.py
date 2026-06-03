@@ -1,29 +1,12 @@
-"""Create-decision logic. Dedup against existing project items, file new ones.
-
-The deterministic marker is always injected by code, regardless of whether the
-issue prose came from a template or from Gemma. The model never owns identity.
-"""
+"""Create-decision logic. Dedup against existing project items, file new ones."""
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
-from typing import Protocol
 
 from security_scan.fingerprint import inject_marker, parse_marker, resolve_fingerprint
 from security_scan.github import GitHub, ProjectContext
 from security_scan.models import Finding
-
-
-class Triage(Protocol):
-    """Optional Gemma-backed triage. Both methods return safe defaults if the
-    underlying model is unreachable; the deterministic path stays correct."""
-
-    enabled: bool
-
-    def is_duplicate_of_existing(self, f: Finding, existing: list[dict]) -> bool: ...
-
-    def write_issue(self, f: Finding) -> tuple[str, str]: ...
 
 
 @dataclass
@@ -31,13 +14,13 @@ class SyncResult:
     created: list[dict] = field(default_factory=list)             # the new issue dicts
     created_findings: list[Finding] = field(default_factory=list)  # the Finding behind each created issue
     skipped_dup: int = 0                                           # fingerprint already filed
-    skipped_fuzzy_dup: int = 0                                     # Gemma matched to an existing
+    skipped_fuzzy_dup: int = 0                                     # reserved (host-side LLM lane may bump)
     skipped_floor: int = 0                                         # below severity_floor
     total_findings: int = 0
 
 
 def default_issue(f: Finding) -> tuple[str, str]:
-    """Deterministic issue title + body. Used when triage is disabled or fails."""
+    """Deterministic issue title + body."""
     title = f.title or f.rule_id or "security finding"
     if len(title) > 200:
         title = title[:197] + "..."
@@ -68,12 +51,11 @@ def sync(
     gh: GitHub,
     project: ProjectContext,
     severity_floor: str = "low",
-    triage: Triage | None = None,
 ) -> SyncResult:
     """Dedup -> create-only. Never edits/closes/reopens.
 
     - Dedup against ALL existing project items (open + closed) — the project is
-      the flat source of truth; there's no parent/child epic any more.
+      the flat source of truth.
     - Marker is always injected by code.
     - Within a single run, the in-memory set prevents intra-run dupes too.
     """
@@ -97,25 +79,7 @@ def sync(
             result.skipped_dup += 1
             continue
 
-        # Optional fuzzy tie-break: catch renamed/moved code (different path -> different fp).
-        if triage is not None and getattr(triage, "enabled", False):
-            try:
-                if triage.is_duplicate_of_existing(f, existing_items):
-                    result.skipped_fuzzy_dup += 1
-                    continue
-            except Exception as e:
-                # Triage failures must never block the deterministic path.
-                print(f"sync: triage fuzzy-dup check failed, continuing: {e}", file=sys.stderr)
-
-        if triage is not None and getattr(triage, "enabled", False):
-            try:
-                title, body = triage.write_issue(f)
-            except Exception as e:
-                print(f"sync: triage prose failed, using default: {e}", file=sys.stderr)
-                title, body = default_issue(f)
-        else:
-            title, body = default_issue(f)
-
+        title, body = default_issue(f)
         body = inject_marker(body, fp, f)
         issue = gh.create_issue(title, body, labels=_labels_for(f))
         item_id = gh.add_to_project(project.id, issue["node_id"])
@@ -129,14 +93,7 @@ def sync(
 
 
 def _labels_for(f: Finding) -> list[str]:
-    """The label set applied to each issue filed.
-
-    `security` is the existing umbrella label. `security-scan:<category>` lets you
-    filter project-board items by category alongside the Category single-select
-    field. `security-scan:<severity>` parallels Severity. All scanner-applied
-    labels are namespaced under `security-scan:` so they're easy to clean up if
-    you ever drop the tool.
-    """
+    """The label set applied to each issue filed."""
     return [
         "security",
         f"security-scan:{f.category}",

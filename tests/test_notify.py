@@ -81,7 +81,7 @@ def test_default_digest_all_dup_skipped_says_so():
     assert ":test_tube:" not in text
     assert ":large_orange_circle:" not in text
     # But a clear "nothing new" message IS present, and the count is in footer.
-    assert "no new findings to triage" in text
+    assert "nothing new to file" in text
     assert "2 already filed" in text
 
 
@@ -92,7 +92,7 @@ def test_default_digest_below_floor_only_says_so():
         SyncResult(created=[], created_findings=[], skipped_floor=1),
         "o/n", "main", "owner", 9,
     )
-    assert "no new findings to triage" in text
+    assert "nothing new to file" in text
     assert "1 below severity floor" in text
 
 
@@ -153,27 +153,6 @@ def test_default_digest_caps_per_section():
         "o/n", "main", "owner", 9,
     )
     assert "and 5 more" in text
-
-
-def test_intro_is_prepended_to_structured_digest(monkeypatch):
-    """LLM intro should ride on top of the deterministic per-category digest,
-    not replace it."""
-    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
-    slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
-    resp = MagicMock(status_code=200)
-    actionable = [_f("high"), _f("medium")]
-    with patch("security_scan.notify.requests.post", return_value=resp) as mp:
-        post_digest(
-            slack, actionable,
-            SyncResult(created=[{"n": 1}, {"n": 2}], created_findings=actionable),
-            "o/n", "main", "owner", 9,
-            intro="High-risk run: jwt@2.10.2 has an unpatched RCE",
-        )
-    sent = mp.call_args.kwargs["json"]["text"]
-    assert "High-risk run: jwt@2.10.2" in sent
-    assert ":test_tube:" in sent
-    assert ":bar_chart:" in sent
-    assert sent.splitlines()[0].startswith(":speech_balloon:")
 
 
 def test_digest_text_legacy_param_still_overrides(monkeypatch):

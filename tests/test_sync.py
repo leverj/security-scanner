@@ -127,31 +127,6 @@ def test_default_issue_omits_raw_secret():
     assert "sk_realfullvalue" not in body
 
 
-def test_triage_fuzzy_dup_skips_creation():
-    f = _f("R1")
-    gh = _gh(existing=[{"item_id": "old", "content_id": "I_old", "number": 5, "state": "OPEN",
-                       "title": "old", "body": "no marker"}])
-    triage = MagicMock()
-    triage.enabled = True
-    triage.is_duplicate_of_existing.return_value = True
-    triage.write_issue.return_value = ("T", "B")
-    result = sync([f], gh, _project(), triage=triage)
-    assert len(result.created) == 0
-    assert result.skipped_fuzzy_dup == 1
-    gh.create_issue.assert_not_called()
-
-
-def test_triage_failure_falls_back_to_deterministic_path():
-    f = _f("R1")
-    gh = _gh(existing=[])
-    triage = MagicMock()
-    triage.enabled = True
-    triage.is_duplicate_of_existing.side_effect = RuntimeError("ollama down")
-    triage.write_issue.side_effect = RuntimeError("also down")
-    result = sync([f], gh, _project(), triage=triage)
-    assert len(result.created) == 1  # deterministic fallback worked
-
-
 def test_labels_include_category_and_severity():
     f = _f("R1", severity="high")
     gh = _gh(existing=[])
@@ -172,22 +147,6 @@ def test_labels_for_supply_chain_category():
     labels = gh.create_issue.call_args.kwargs.get("labels") or gh.create_issue.call_args.args[2]
     assert "security-scan:iac" in labels
     assert "security-scan:medium" in labels
-
-
-def test_uses_triage_prose_when_available():
-    f = _f("R1")
-    gh = _gh(existing=[])
-    triage = MagicMock()
-    triage.enabled = True
-    triage.is_duplicate_of_existing.return_value = False
-    triage.write_issue.return_value = ("LLM Title", "LLM Body")
-    sync([f], gh, _project(), triage=triage)
-    args = gh.create_issue.call_args
-    title = args.args[0] if args.args else args.kwargs["title"]
-    body = args.args[1] if len(args.args) >= 2 else args.kwargs["body"]
-    assert title == "LLM Title"
-    assert "LLM Body" in body
-    assert "<!-- security-scan:" in body  # marker still injected by code
 
 
 def test_severity_and_category_fields_set_with_correct_options():

@@ -17,8 +17,6 @@ _CATEGORY = {
     "osv": "dependency",
     "gitleaks": "secret",
     "semgrep": "sast",
-    "codex": "sast",
-    "gemma": "sast",
     "image": "image",
 }
 
