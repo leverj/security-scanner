@@ -27,6 +27,11 @@ class ScannersConfig:
     trivy: bool = True          # comprehensive: vuln + secret + misconfig + license
     trufflehog: bool = True     # verified secrets (validates live tokens)
     syft: bool = True           # SBOM artifact (no project items filed)
+    # Supply-chain risk via Socket.dev. Off by default — when enabled,
+    # the repo's LOCKFILES are uploaded to socket.dev SaaS for analysis
+    # (typosquat / install-script / capability / known-malware detection).
+    # Source files never leave the box.
+    supply_chain: bool = False
 
 
 @dataclass
@@ -96,6 +101,28 @@ class SupabaseConfig:
 
 
 @dataclass
+class SupplyChainConfig:
+    """Behavioral / reputation supply-chain analysis via Socket.dev.
+
+    OSV-Scanner covers known-CVE dep findings. This lane covers what OSV
+    can't see: typosquatted package names, install-script execution,
+    capability escalations between versions, maintainer takeover,
+    known-malicious packages.
+
+    SaaS trust boundary: when enabled, the repo's LOCKFILES (not source
+    files) are sent to socket.dev for analysis. The skill's upgrade flow
+    surfaces this before flipping the flag on.
+    """
+    vendor: str = "socket"            # "socket" (only one supported today)
+    binary: str = "socket"            # CLI on PATH inside the container
+    api_key_env: str = "SOCKET_API_KEY"
+    timeout: int = 600
+    # Optional allow-list of Socket issue types to keep — empty means "all".
+    # See https://socket.dev/docs/issue-types for the catalog.
+    issue_types: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PathsConfig:
     exclude: list[str] = field(default_factory=list)
 
@@ -130,6 +157,7 @@ class Config:
     slack: SlackConfig
     image_scan: ImageScanConfig = field(default_factory=ImageScanConfig)
     supabase: SupabaseConfig = field(default_factory=SupabaseConfig)
+    supply_chain: SupplyChainConfig = field(default_factory=SupplyChainConfig)
     # bundled defaults
     semgrep_rules_dir: str | None = None
 
@@ -189,6 +217,7 @@ def _from_dict(raw: dict) -> Config:
         trivy=bool(scanners_raw.get("trivy", True)),
         trufflehog=bool(scanners_raw.get("trufflehog", True)),
         syft=bool(scanners_raw.get("syft", True)),
+        supply_chain=bool(scanners_raw.get("supply_chain", False)),
     )
 
     img_raw = raw.get("image_scan") or {}
@@ -227,6 +256,20 @@ def _from_dict(raw: dict) -> Config:
             "Set either `url_env` (DSN) OR all of host_env/db_env/user_env/password_env."
         )
 
+    sc_raw = raw.get("supply_chain") or {}
+    sc_cfg = SupplyChainConfig(
+        vendor=str(sc_raw.get("vendor") or "socket"),
+        binary=str(sc_raw.get("binary") or "socket"),
+        api_key_env=str(sc_raw.get("api_key_env") or "SOCKET_API_KEY"),
+        timeout=int(sc_raw.get("timeout") or 600),
+        issue_types=list(sc_raw.get("issue_types") or []),
+    )
+    if sc_cfg.vendor not in ("socket",):
+        raise ConfigError(
+            f"config: supply_chain.vendor must be 'socket' (got {sc_cfg.vendor!r}); "
+            "future versions may add 'phylum'."
+        )
+
     paths_raw = raw.get("paths") or {}
     paths = PathsConfig(exclude=list(paths_raw.get("exclude") or []))
 
@@ -249,5 +292,6 @@ def _from_dict(raw: dict) -> Config:
         slack=slack,
         image_scan=image_scan_cfg,
         supabase=sb_cfg,
+        supply_chain=sc_cfg,
         semgrep_rules_dir=raw.get("semgrep_rules_dir"),
     )

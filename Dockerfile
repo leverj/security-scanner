@@ -19,6 +19,10 @@ ARG SEMGREP_VERSION=1.164.0
 ARG TRIVY_VERSION=0.71.0
 ARG TRUFFLEHOG_VERSION=3.95.5
 ARG SYFT_VERSION=1.44.0
+# Node.js is used solely to host the Socket CLI (npm-distributed) for the
+# opt-in supply_chain lane. Pin nodesource major to keep the install stable.
+ARG NODE_MAJOR=22
+ARG SOCKET_CLI_VERSION=1.0.55
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -130,6 +134,18 @@ RUN set -eux; \
     rm /tmp/syft.tar.gz; \
     chmod +x /usr/local/bin/syft; \
     syft --version
+
+# --- socket CLI (supply-chain lane, opt-in) ------------------------------
+# Adds Node.js + @socketsecurity/cli for the opt-in supply-chain lane.
+# When `scanners.supply_chain: false` (default), the binary is present but
+# never invoked — zero runtime cost. The size cost (~80MB Node + ~20MB CLI)
+# is the price of having a CI-friendly supply-chain lane in the same image.
+RUN set -eux; \
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -; \
+    apt-get install -y --no-install-recommends nodejs; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*; \
+    npm install -g "@socketsecurity/cli@${SOCKET_CLI_VERSION}"; \
+    socket --version
 
 # --- security-scan itself -------------------------------------------------------
 WORKDIR /app

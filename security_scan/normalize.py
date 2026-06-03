@@ -18,6 +18,7 @@ _CATEGORY = {
     "gitleaks": "secret",
     "semgrep": "sast",
     "image": "image",
+    "supply_chain": "supply-chain",
 }
 
 

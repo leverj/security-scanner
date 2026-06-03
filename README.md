@@ -271,6 +271,36 @@ Self-hosted Mac mini setup (applies to both GitHub Actions and CircleCI):
 
 ---
 
+## Supply-chain lane (opt-in)
+
+OSV-Scanner + Trivy cover **known-CVE** dependency findings. They are blind
+to the dominant supply-chain attack patterns of the last few years:
+typosquatted package names, install-script execution, capability changes
+between versions, maintainer takeover, known-malicious packages.
+
+Enable the supply-chain lane to cover those:
+
+```yaml
+scanners:
+  supply_chain: true        # off by default; opt-in
+supply_chain:
+  vendor: "socket"          # only one supported today
+  api_key_env: "SOCKET_API_KEY"
+  timeout: 600
+  issue_types: []           # empty => all Socket issue types; populate to allow-list
+```
+
+Provide `SOCKET_API_KEY` via env, same as `GITHUB_TOKEN`. Findings get
+`category: supply-chain` on the Projects v2 board.
+
+**SaaS trust boundary**: when enabled, the repo's **lockfiles** (not source
+files) are sent to socket.dev for analysis. If that's a problem for your
+threat model, leave this off — the deterministic lanes still cover known-CVE
+supply-chain hits.
+
+Image ships with Node.js + `@socketsecurity/cli` baked in for the CI-friendly
+path. ~100MB image size cost; zero runtime cost when the lane is off.
+
 ## How dedup works
 
 Each finding gets a deterministic fingerprint (`rule_id + file_path + normalized
