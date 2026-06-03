@@ -227,7 +227,12 @@ def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules:
     if t.scanner == "trufflehog":
         return mod.run(repo_dir, exclude=cfg.paths.exclude)
     if t.scanner == "syft":
-        sbom_path = repo_dir.parent / f"sbom-{cfg.repo_name}.cyclonedx.json"
+        # Write the SBOM to a writable scratch dir, NOT repo_dir.parent: in
+        # --repo-dir mode the parent can be an unwritable mount root (e.g. "/" for
+        # --repo-dir /work, where the non-root scanner user hits EACCES and syft
+        # exits 1). A tempdir is always writable and still outside the scanned tree,
+        # so other scanners never ingest the SBOM.
+        sbom_path = Path(tempfile.gettempdir()) / f"sbom-{cfg.repo_name}.cyclonedx.json"
         return mod.run(repo_dir, output_path=sbom_path)
     if t.scanner == "supply_chain":
         return mod.run(
