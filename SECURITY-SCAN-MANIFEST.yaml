@@ -27,13 +27,14 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.3.2"
+version: "0.3.3"
 config_schema_version: 3
 docker_image: "leverj/security-scan"
-released: "2026-06-02"
+released: "2026-06-03"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
+  - "0.3.3: fix image-scan lane failing under the non-root scanner user. The Dockerfile previously left /var/cache/trivy with `chmod a+rX` (read-only for non-root); `trivy image` needs to create a `fanal/` subdir there for layer caching and was failing with `permission denied` on every base-image scan. Replaced with `chown -R 1000:1000`. v0.3.2's image-scan lane was effectively non-functional; v0.3.3 restores it."
   - "0.3.2: image-scan follow-ups (issue #14, from codex peer review). Fingerprint now includes image_ref so the same CVE in two different base images files as two distinct issues instead of one suppressing the other. Bare base names (`alpine`, `nginx`, `redis`, etc.) are recognized — previously dropped as if they were stage aliases. `paths.exclude` now suppresses Dockerfile discovery (vendored copies no longer trigger image pulls). Mutually-exclusive `built_image.ref` + `build_locally` raises ValueError at config-load time. Exit code 3 now fires when only image_scan or supabase lanes are enabled and all fail."
   - "0.3.1: live Supabase Security Advisor lane (epic #4). Optional psycopg-backed scanner that opens a READ-ONLY connection to a project's Postgres and runs vendored Supabase advisor queries (rls_disabled_in_public, security_definer_view, function_search_path_mutable, role usage on unexpected schemas, materialized views in public, auth.users exposure, etc.). Findings get the new `category: config` on the Projects v2 board. Credentials via env: either `url_env` (full DSN) or discrete host/db/user/password env names. The image now installs `psycopg[binary]`; pip users want `pip install security-scan[live]`."
   - "0.3.0: image-scanning lane (epic #9). Three modes — Dockerfile audit (already covered by trivy fs misconfig), `base_images` (run `trivy image` over every FROM ref in the repo's Dockerfile(s); ON by default), and opt-in `built_image` (pull and scan a published ref OR `docker build .` the cloned tree). Findings get the new `category: image` on the Projects v2 board (skill should add this option to the Category single-select field on upgrade). `build_locally` requires the docker socket AND `SECURITY_SCAN_ALLOW_BUILD=1` in env — it's the one opt-in exception to the otherwise-strict 'never execute repo code' invariant."
