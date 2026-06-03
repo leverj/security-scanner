@@ -90,13 +90,16 @@ RUN set -eux; \
     trivy --version
 
 # Pre-cache the trivy DBs at build time so first-run is fast and offline-OK.
-# (The runner passes --skip-db-update.) Cache lives in a world-readable
-# location so the non-root scanner user (added below) can read it.
+# (The runner passes --skip-db-update.) The dir must be writable by the
+# non-root scanner user (uid 1000, added below): `trivy image` creates a
+# `fanal/` subdirectory at runtime to cache extracted image layers, and an
+# `a+rX` chmod (read+search only) leaves that creation failing with
+# `permission denied`. chown to scanner so the dir is writable.
 ENV TRIVY_CACHE_DIR=/var/cache/trivy
 RUN mkdir -p $TRIVY_CACHE_DIR \
     && trivy --cache-dir $TRIVY_CACHE_DIR image --download-db-only \
     && trivy --cache-dir $TRIVY_CACHE_DIR image --download-java-db-only \
-    && chmod -R a+rX $TRIVY_CACHE_DIR
+    && chown -R 1000:1000 $TRIVY_CACHE_DIR
 
 # --- trufflehog — verified secret detection ------------------------------
 RUN set -eux; \
