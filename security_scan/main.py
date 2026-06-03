@@ -31,8 +31,13 @@ def cli(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--config", required=True, help="Path to config.yaml")
     parser.add_argument("--dry-run", action="store_true", help="Detect/scan/normalize but do not create any GitHub issues")
-    parser.add_argument("--work-dir", default=None, help="Where to clone the repo (default: a tempdir under /tmp)")
-    parser.add_argument("--keep-work", action="store_true", help="Keep the cloned tree after the run")
+    parser.add_argument(
+        "--repo-dir",
+        default=None,
+        help="Scan this existing directory instead of cloning. Skips the gh clone step entirely.",
+    )
+    parser.add_argument("--work-dir", default=None, help="Where to clone the repo (default: a tempdir under /tmp). Ignored when --repo-dir is set.")
+    parser.add_argument("--keep-work", action="store_true", help="Keep the cloned tree after the run. Ignored when --repo-dir is set (we never delete user-supplied directories).")
     args = parser.parse_args(argv)
 
     try:
@@ -41,23 +46,54 @@ def cli(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    return run(cfg, dry_run=args.dry_run, work_dir=args.work_dir, keep_work=args.keep_work)
+    return run(
+        cfg,
+        dry_run=args.dry_run,
+        repo_dir=args.repo_dir,
+        work_dir=args.work_dir,
+        keep_work=args.keep_work,
+    )
 
 
-def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_work: bool = False) -> int:
-    work_root = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="security_scan-"))
-    repo_dir = work_root / cfg.repo_name
+def run(
+    cfg: Config,
+    dry_run: bool = False,
+    repo_dir: str | None = None,
+    work_dir: str | None = None,
+    keep_work: bool = False,
+) -> int:
+    """Orchestrate the scan.
 
+    Two modes:
+      - `repo_dir=None` (default): clone `cfg.repo@cfg.ref` into a tempdir
+        (or `work_dir` if given) and scan the clone. Wipes the clone on exit.
+      - `repo_dir=<path>`: scan that directory in-place. NO clone, NO cleanup.
+        Use this from a CI runner that's already checked the repo out.
+    """
     gh = GitHub(cfg.github_token, cfg.repo_owner, cfg.repo_name, dry_run=dry_run)
+    cloned = repo_dir is None
+    work_root: Path | None = None
+
+    if cloned:
+        work_root = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="security_scan-"))
+        repo_path = work_root / cfg.repo_name
+    else:
+        repo_path = Path(repo_dir).resolve()
+        if not repo_path.is_dir():
+            print(f"error: --repo-dir {repo_path} is not a directory", file=sys.stderr)
+            return 2
 
     try:
-        print(f"clone: {cfg.repo}@{cfg.ref} -> {repo_dir}", file=sys.stderr)
-        if repo_dir.exists():
-            shutil.rmtree(repo_dir)
-        gh.clone(cfg.ref, repo_dir, shallow=True)
+        if cloned:
+            print(f"clone: {cfg.repo}@{cfg.ref} -> {repo_path}", file=sys.stderr)
+            if repo_path.exists():
+                shutil.rmtree(repo_path)
+            gh.clone(cfg.ref, repo_path, shallow=True)
+        else:
+            print(f"scan: using existing tree {repo_path} (no clone)", file=sys.stderr)
 
         detection = detect_stack(
-            repo_dir,
+            repo_path,
             {
                 "osv":        cfg.scanners.osv,
                 "gitleaks":   cfg.scanners.gitleaks,
@@ -70,8 +106,8 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         )
         _log_detection(detection)
 
-        findings, completed_scanners, failed, sbom_artifacts = _scan_and_normalize(detection, cfg, repo_dir)
-        _scan_images(cfg, repo_dir, findings, completed_scanners, failed)
+        findings, completed_scanners, failed, sbom_artifacts = _scan_and_normalize(detection, cfg, repo_path)
+        _scan_images(cfg, repo_path, findings, completed_scanners, failed)
         _scan_supabase_live(cfg, findings, completed_scanners, failed)
         _log_scanner_summary(completed_scanners, failed)
         for sbom in sbom_artifacts:
@@ -127,14 +163,13 @@ def run(cfg: Config, dry_run: bool = False, work_dir: str | None = None, keep_wo
         print(f"github: {e}", file=sys.stderr)
         return 4
     finally:
-        # Always wipe the clone itself (it contains repo content; with the old
-        # token-in-URL pattern it also held credentials). Preserving `work_root`
-        # is still respected when the caller supplied one and didn't ask to keep.
-        if not keep_work:
-            if repo_dir.exists():
-                shutil.rmtree(repo_dir, ignore_errors=True)
+        # Only wipe directories we created. A user-supplied --repo-dir is never
+        # touched (it's their working tree). Honour --keep-work for clones.
+        if cloned and not keep_work:
+            if repo_path.exists():
+                shutil.rmtree(repo_path, ignore_errors=True)
             # Remove the containing tempdir only when we created it ourselves.
-            if work_dir is None and work_root.exists():
+            if work_dir is None and work_root is not None and work_root.exists():
                 shutil.rmtree(work_root, ignore_errors=True)
 
 
