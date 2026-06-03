@@ -95,12 +95,13 @@ def run(
         detection = detect_stack(
             repo_path,
             {
-                "osv":        cfg.scanners.osv,
-                "gitleaks":   cfg.scanners.gitleaks,
-                "semgrep":    cfg.scanners.semgrep,
-                "trivy":      cfg.scanners.trivy,
-                "trufflehog": cfg.scanners.trufflehog,
-                "syft":       cfg.scanners.syft,
+                "osv":          cfg.scanners.osv,
+                "gitleaks":     cfg.scanners.gitleaks,
+                "semgrep":      cfg.scanners.semgrep,
+                "trivy":        cfg.scanners.trivy,
+                "trufflehog":   cfg.scanners.trufflehog,
+                "syft":         cfg.scanners.syft,
+                "supply_chain": cfg.scanners.supply_chain,
             },
             exclude=cfg.paths.exclude,
         )
@@ -151,6 +152,7 @@ def run(
         any_lane_enabled = (
             cfg.scanners.osv or cfg.scanners.gitleaks or cfg.scanners.semgrep
             or cfg.scanners.trivy or cfg.scanners.trufflehog or cfg.scanners.syft
+            or cfg.scanners.supply_chain
             or cfg.image_scan.base_images or cfg.image_scan.built_image.enabled
             or cfg.supabase.enabled
         )
@@ -227,6 +229,15 @@ def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules:
     if t.scanner == "syft":
         sbom_path = repo_dir.parent / f"sbom-{cfg.repo_name}.cyclonedx.json"
         return mod.run(repo_dir, output_path=sbom_path)
+    if t.scanner == "supply_chain":
+        return mod.run(
+            repo_dir,
+            binary=cfg.supply_chain.binary,
+            api_key_env=cfg.supply_chain.api_key_env,
+            timeout=cfg.supply_chain.timeout,
+            issue_types=cfg.supply_chain.issue_types or None,
+            exclude=cfg.paths.exclude,
+        )
     return RunnerResult(t.scanner, None, False, f"unknown scanner: {t.scanner}")
 
 

@@ -216,6 +216,7 @@ def detect_stack(
     trivy_on = bool(scanners_enabled.get("trivy"))
     trufflehog_on = bool(scanners_enabled.get("trufflehog"))
     syft_on = bool(scanners_enabled.get("syft"))
+    supply_chain_on = bool(scanners_enabled.get("supply_chain"))
 
     targets: list[ScannerTarget] = []
     notes: list[str] = []
@@ -261,6 +262,12 @@ def detect_stack(
         targets.append(ScannerTarget(scanner="trufflehog", ecosystem=None, targets=[root]))
     if syft_on:
         targets.append(ScannerTarget(scanner="syft", ecosystem=None, targets=[root]))
+
+    # Supply-chain lane runs only when there's at least one ecosystem worth
+    # analyzing (declared via lockfiles in eco_dirs above). Socket itself
+    # re-detects, but skipping here saves a SaaS round-trip on empty repos.
+    if supply_chain_on and eco_dirs:
+        targets.append(ScannerTarget(scanner="supply_chain", ecosystem=None, targets=[root]))
 
     # Unscanned ecosystems (Java, PHP, Dart, ...) — always note, scanner-agnostic.
     for label in sorted(unscanned_notes):
