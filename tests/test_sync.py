@@ -166,3 +166,48 @@ def test_severity_and_category_fields_set_with_correct_options():
     args = calls[1].args
     assert args[2] == proj.category
     assert args[3] == "sast"
+
+
+def test_board_tallies_count_open_and_recent_closes():
+    """SyncResult should carry board_open_count + board_closed_24h_count
+    computed from the snapshot taken at the START of the run."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    recent = (now - timedelta(hours=3)).isoformat().replace("+00:00", "Z")
+    old    = (now - timedelta(days=5)).isoformat().replace("+00:00", "Z")
+
+    # 3 open, 2 closed-within-24h, 1 closed-older-than-24h.
+    existing = [
+        {"item_id": f"i{i}", "content_id": f"c{i}", "number": i, "state": "OPEN",
+         "title": "x", "body": "no marker", "closed_at": None}
+        for i in range(3)
+    ] + [
+        {"item_id": "c-recent-1", "content_id": "cc1", "number": 100, "state": "CLOSED",
+         "title": "x", "body": "no marker", "closed_at": recent},
+        {"item_id": "c-recent-2", "content_id": "cc2", "number": 101, "state": "CLOSED",
+         "title": "x", "body": "no marker", "closed_at": recent},
+        {"item_id": "c-old",      "content_id": "cc3", "number": 102, "state": "CLOSED",
+         "title": "x", "body": "no marker", "closed_at": old},
+    ]
+
+    gh = _gh(existing=existing)
+    result = sync([], gh, _project())
+
+    assert result.board_open_count == 3
+    assert result.board_closed_24h_count == 2
+
+
+def test_board_tallies_tolerate_missing_or_unparseable_closed_at():
+    existing = [
+        {"item_id": "a", "content_id": "ca", "number": 1, "state": "CLOSED",
+         "title": "x", "body": "no marker", "closed_at": None},          # missing => skip
+        {"item_id": "b", "content_id": "cb", "number": 2, "state": "CLOSED",
+         "title": "x", "body": "no marker", "closed_at": "garbage"},     # unparseable => skip
+        {"item_id": "c", "content_id": "cc", "number": 3, "state": "OPEN",
+         "title": "x", "body": "no marker", "closed_at": None},
+    ]
+    gh = _gh(existing=existing)
+    result = sync([], gh, _project())
+    assert result.board_open_count == 1
+    assert result.board_closed_24h_count == 0

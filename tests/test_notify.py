@@ -172,3 +172,20 @@ def test_failure_is_non_blocking(monkeypatch):
     with patch("security_scan.notify.requests.post", side_effect=requests.ConnectionError("down")):
         ok = post_digest(slack, [], SyncResult(), "o/n", "main", "owner", 1)
     assert ok is False  # didn't raise
+
+
+def test_digest_includes_board_state_line(monkeypatch):
+    """Footer should call out open backlog + 24h-close throughput so Slack
+    readers see board momentum, not just this-run counts."""
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
+    slack = SlackConfig(enabled=True, webhook_url_env="SLACK_WEBHOOK_URL")
+    resp = MagicMock(status_code=200)
+    result = SyncResult(
+        created=[{"n": 1}], created_findings=[_f("high")],
+        skipped_dup=2, skipped_floor=0,
+        board_open_count=42, board_closed_24h_count=7,
+    )
+    with patch("security_scan.notify.requests.post", return_value=resp) as mp:
+        post_digest(slack, [], result, "o/n", "main", "owner", 9)
+    sent = mp.call_args.kwargs["json"]["text"]
+    assert ":bookmark_tabs: board: open 42 · closed-24h 7" in sent

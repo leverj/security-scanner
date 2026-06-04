@@ -153,6 +153,13 @@ def _default_digest(
         f":card_index_dividers: filed {len(result.created)} · "
         f"dup-skipped {result.skipped_dup} · below-floor {result.skipped_floor}"
     )
+    # Board-state context: how big is the open backlog, and how many got
+    # closed in the last day. Snapshot is from the START of this run, so it
+    # describes the state Slack readers should picture going into triage.
+    lines.append(
+        f":bookmark_tabs: board: open {result.board_open_count} · "
+        f"closed-24h {result.board_closed_24h_count}"
+    )
     return "\n".join(lines)
 
 
