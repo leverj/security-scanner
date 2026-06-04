@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from security_scan.fingerprint import inject_marker, parse_marker, resolve_fingerprint
 from security_scan.github import GitHub, ProjectContext
@@ -17,6 +18,11 @@ class SyncResult:
     skipped_fuzzy_dup: int = 0                                     # reserved (host-side LLM lane may bump)
     skipped_floor: int = 0                                         # below severity_floor
     total_findings: int = 0
+    # Board-state tallies, computed from the existing items snapshot taken
+    # at the START of the run (so they reflect the board BEFORE we filed
+    # the new findings — the "before" picture the Slack digest reports).
+    board_open_count: int = 0
+    board_closed_24h_count: int = 0
 
 
 def default_issue(f: Finding) -> tuple[str, str]:
@@ -63,10 +69,16 @@ def sync(
 
     existing_items = gh.list_project_items(project.id)
     existing_fps: set[str] = set()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     for it in existing_items:
         marker = parse_marker(it.get("body"))
         if marker:
             existing_fps.add(marker["fp"])
+        state = (it.get("state") or "").upper()
+        if state == "OPEN":
+            result.board_open_count += 1
+        elif state == "CLOSED" and _closed_within(it.get("closed_at"), cutoff):
+            result.board_closed_24h_count += 1
 
     for f in findings:
         if not f.meets_floor(severity_floor):
@@ -99,3 +111,18 @@ def _labels_for(f: Finding) -> list[str]:
         f"security-scan:{f.category}",
         f"security-scan:{f.severity}",
     ]
+
+
+def _closed_within(iso_ts: str | None, cutoff: datetime) -> bool:
+    """True iff `iso_ts` parses to a UTC datetime >= cutoff. GitHub returns
+    closedAt as ISO 8601 with a `Z` suffix."""
+    if not iso_ts:
+        return False
+    try:
+        # Python 3.11 fromisoformat accepts 'Z' since 3.11; be defensive anyway.
+        ts = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts >= cutoff

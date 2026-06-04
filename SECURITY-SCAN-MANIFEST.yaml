@@ -27,13 +27,14 @@
 # Adding to this file in a new release is non-breaking. Removing fields is
 # breaking — skills must tolerate older manifests missing keys.
 
-version: "0.5.1"
+version: "0.5.2"
 config_schema_version: 4
 docker_image: "leverj/security-scan"
 released: "2026-06-03"
 
 # One-liners for the upgrade prompt the skill shows users.
 changelog:
+  - "0.5.2: Slack digest footer now also reports board momentum — open backlog count + closed-in-last-24h count — so triagers see board state at a glance, not just per-run counts. Adds a new `:bookmark_tabs: board: open N · closed-24h N` line beneath the existing `:card_index_dividers:` line. Implementation: `list_project_items` GraphQL now fetches `closedAt`; sync.py tallies OPEN vs CLOSED-within-24h from the start-of-run snapshot; SyncResult carries `board_open_count` + `board_closed_24h_count`. No config-schema change."
   - "0.5.1: fix two lanes that were dark in CI. (1) osv: the runner invoked the legacy top-level `osv-scanner <flags> <path>` form with `--skip-git`, both removed in osv-scanner v2 — v2 rejected it with `flag provided but not defined: -skip-git` (exit 127), silently disabling all dependency-CVE coverage while the run still exited 0. Now calls `osv-scanner scan source --format sarif --recursive <dir>`; `--skip-git` is dropped because v2 skips the git root by default (the opt-in is the inverse, `--include-git-root`). (2) syft: the SBOM was written to `repo_dir.parent`, which is the unwritable mount root `/` under `--repo-dir /work` (the GitHub Action / CircleCI path) — the non-root scanner user got EACCES and syft exited 1. The SBOM now goes to a writable tempdir, still outside the scanned tree. No config-schema change."
   - "0.5.0: supply-chain lane via Socket.dev (issue #20). New opt-in `scanners.supply_chain` toggle wraps the Socket CLI to catch typosquats, install-script execution, capability escalations, and known malware — gaps OSV/Trivy can't see. Findings get the new `category: supply-chain` on the Projects v2 board (skill should add this option on upgrade). DEFAULT OFF. SaaS trust boundary: when enabled, the repo's LOCKFILES (not source) are sent to socket.dev for analysis; configure `SOCKET_API_KEY` env. Image grows ~100MB (Node.js + npm-distributed Socket CLI)."
   - "0.4.1: add `--repo-dir <path>` CLI flag that scans an existing directory in-place, skipping the `gh clone` step. Intended for the upcoming GitHub Action wrapper where the runner has already done `actions/checkout`. The user-supplied directory is never deleted — `--keep-work` is implicit when `--repo-dir` is set. No config-schema change."

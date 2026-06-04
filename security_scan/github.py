@@ -154,8 +154,10 @@ class GitHub:
 
     def list_project_items(self, project_id: str) -> list[dict]:
         """Paginated list of project items (issues only). Each dict:
-            {item_id, content_id, number, state, title, body}
-        Drafts and PR items are skipped. Used for body-marker dedup.
+            {item_id, content_id, number, state, title, body, closed_at}
+        `closed_at` is an ISO 8601 UTC string (or None when OPEN). Drafts and PR
+        items are skipped. Used for body-marker dedup AND board-state tallies in
+        the Slack digest.
         """
         if self.dry_run or project_id == "DRY_RUN_PROJECT":
             return []
@@ -170,7 +172,7 @@ class GitHub:
                 nodes {
                   id
                   content {
-                    ... on Issue { id number state title body }
+                    ... on Issue { id number state title body closedAt }
                   }
                 }
               }
@@ -193,6 +195,7 @@ class GitHub:
                     "state": content.get("state"),
                     "title": content.get("title") or "",
                     "body": content.get("body") or "",
+                    "closed_at": content.get("closedAt"),
                 })
             if not payload.get("pageInfo", {}).get("hasNextPage"):
                 break
