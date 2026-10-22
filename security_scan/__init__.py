@@ -1,3 +1,3 @@
 """security_scan — stateless single-repo security scanner; files findings into a GitHub Projects v2 board."""
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
