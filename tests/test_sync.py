@@ -1,3 +1,4 @@
+from datetime import UTC
 from unittest.mock import MagicMock
 
 from security_scan.fingerprint import inject_marker, resolve_fingerprint
@@ -171,9 +172,9 @@ def test_severity_and_category_fields_set_with_correct_options():
 def test_board_tallies_count_open_and_recent_closes():
     """SyncResult should carry board_open_count + board_closed_24h_count
     computed from the snapshot taken at the START of the run."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recent = (now - timedelta(hours=3)).isoformat().replace("+00:00", "Z")
     old    = (now - timedelta(days=5)).isoformat().replace("+00:00", "Z")
 

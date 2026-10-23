@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from security_scan.fingerprint import inject_marker, parse_marker, resolve_fingerprint
 from security_scan.github import GitHub, ProjectContext
@@ -69,7 +69,7 @@ def sync(
 
     existing_items = gh.list_project_items(project.id)
     existing_fps: set[str] = set()
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
     for it in existing_items:
         marker = parse_marker(it.get("body"))
         if marker:
@@ -124,5 +124,5 @@ def _closed_within(iso_ts: str | None, cutoff: datetime) -> bool:
     except ValueError:
         return False
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     return ts >= cutoff
