@@ -446,14 +446,23 @@ def _extra_semgrep_rules(cfg: Config, repo_dir: Path) -> tuple[list[tuple[Path, 
 
 def _log_extra_rules_active(extra: list[tuple[Path, set[str]]], sarif: dict | None) -> None:
     """Report how many of each extra file's rule ids Semgrep actually loaded (from the
-    SARIF rule table; Semgrep prefixes ids with a path-derived namespace)."""
-    loaded = set()
+    SARIF rule table; Semgrep prefixes ids with a path-derived namespace) and how
+    many results they produced — whether or not those results are later filed."""
+    loaded: set[str] = set()
+    hits: dict[str, int] = {}
     for run in (sarif or {}).get("runs", []) or []:
         for r in ((run.get("tool") or {}).get("driver") or {}).get("rules", []) or []:
             if isinstance(r, dict) and isinstance(r.get("id"), str):
                 loaded.add(r["id"].rsplit(".", 1)[-1])
+        for res in run.get("results", []) or []:
+            rid = res.get("ruleId") if isinstance(res, dict) else None
+            if isinstance(rid, str):
+                short = rid.rsplit(".", 1)[-1]
+                hits[short] = hits.get(short, 0) + 1
     for p, ids in extra:
-        print(f"semgrep: extra rules {p.name}: {len(ids & loaded)}/{len(ids)} rules active", file=sys.stderr)
+        n = sum(hits.get(i, 0) for i in ids)
+        print(f"semgrep: extra rules {p.name}: {len(ids & loaded)}/{len(ids)} rules active, {n} result(s)",
+              file=sys.stderr)
 
 
 def _has_rule_files(d: Path) -> bool:

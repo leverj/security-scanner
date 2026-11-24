@@ -50,9 +50,9 @@ def _cfg(extra=None):
     )
 
 
-def _sarif(rule_ids):
+def _sarif(rule_ids, results=()):
     return {"runs": [{"tool": {"driver": {"name": "Semgrep", "rules": [{"id": i} for i in rule_ids]}},
-                      "results": []}]}
+                      "results": [{"ruleId": r} for r in results]}]}
 
 
 SEMGREP = ScannerTarget(scanner="semgrep", ecosystem=None, targets=[])
@@ -127,14 +127,16 @@ def test_extra_rules_resolved_logged_and_counted(tmp_path, capsys):
     (tmp_path / rel).parent.mkdir(parents=True)
     (tmp_path / rel).write_text(RULES)
     loaded = ["bundled.some-rule", "work..security-scan.semgrep.demo-one", "work..security-scan.semgrep.demo-two"]
-    with patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", _sarif(loaded), True)) as m:
+    sarif = _sarif(loaded, results=["work..security-scan.semgrep.demo-one", "work..security-scan.semgrep.demo-one",
+                                    "bundled.some-rule"])
+    with patch("security_scan.runners.semgrep.run", return_value=RunnerResult("semgrep", sarif, True)) as m:
         r = _invoke_runner(SEMGREP, _cfg([rel]), tmp_path, "/bundled")
     assert r.completed
     assert m.call_args.kwargs["extra_rules"] == [(tmp_path / rel).resolve()]
     err = capsys.readouterr().err
     digest = hashlib.sha256(RULES.encode()).hexdigest()
     assert f"semgrep: extra rules {rel} sha256={digest} rules=2" in err
-    assert "semgrep: extra rules demo.yaml: 2/2 rules active" in err
+    assert "semgrep: extra rules demo.yaml: 2/2 rules active, 2 result(s)" in err
 
 
 def test_partially_loaded_rules_are_reported_not_hidden(tmp_path, capsys):
@@ -142,7 +144,7 @@ def test_partially_loaded_rules_are_reported_not_hidden(tmp_path, capsys):
     with patch("security_scan.runners.semgrep.run",
                return_value=RunnerResult("semgrep", _sarif(["x.demo-one"]), True)):
         _invoke_runner(SEMGREP, _cfg(["r.yaml"]), tmp_path, "/bundled")
-    assert "r.yaml: 1/2 rules active" in capsys.readouterr().err
+    assert "r.yaml: 1/2 rules active, 0 result(s)" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("setup,needle", [
