@@ -1,0 +1,15 @@
+repo: owner/name
+ref: main
+project:
+  owner: owner
+  number: 5
+scanners:
+  osv: true
+  gitleaks: true
+  semgrep: true
+  trivy: true
+  trufflehog: true
+  syft: true
+  supply_chain: false
+image_scan:
+  base_images: false
