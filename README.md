@@ -380,6 +380,16 @@ Pass `--no-push` to do a release dry-run that builds locally without
 pushing, or `--single-arch` to skip multi-arch buildx. Full flag list:
 `./security-scan.sh publish --help`.
 
+Building linux/amd64 on Apple Silicon needs no Rosetta. The Dockerfile's
+`fetch` stage runs on the build platform and installs the Go tools
+(osv-scanner, gitleaks, trivy, trufflehog, syft) from their pinned releases
+after checking each against the release's SHA-256 checksums and checking the
+binary's ELF architecture; none of them is executed during a cross build.
+Only apt, pip and npm run for the foreign platform, through binfmt/QEMU.
+Because some Go tools fault under QEMU at runtime, test an image on a native
+host for its platform: `tests/image/run.sh <image>` (CI runs it on native
+amd64 and arm64 runners).
+
 ## Use as a Claude Code skill
 
 The companion bundle at [`leverj/ai-skills`](https://github.com/leverj/ai-skills)
