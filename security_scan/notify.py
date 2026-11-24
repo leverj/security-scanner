@@ -26,12 +26,18 @@ def post_digest(
     project_owner: str,
     project_number: int,
     digest_text: str | None = None,
+    no_scan_alert: tuple[str, str] | None = None,
 ) -> bool:
-    """Post a Slack message summarizing the run. Returns True on success."""
+    """Post a Slack message summarizing the run. Returns True on success.
+
+    `no_scan_alert` = (headline, reason) when no enabled check completed (the
+    run exits 3): the digest leads with a CRITICAL line instead of reading as
+    a clean run."""
     if not slack.enabled:
         return False
 
-    text = digest_text or _default_digest(findings, result, repo, ref, project_owner, project_number)
+    text = digest_text or _default_digest(findings, result, repo, ref, project_owner, project_number,
+                                          no_scan_alert=no_scan_alert)
 
     try:
         if slack.webhook_url_env:
@@ -95,6 +101,7 @@ _PER_SECTION_LIMIT = 5  # show top N findings per category to keep messages skim
 def _default_digest(
     findings: list[Finding], result: SyncResult, repo: str, ref: str,
     project_owner: str, project_number: int,
+    no_scan_alert: tuple[str, str] | None = None,
 ) -> str:
     """Slack mrkdwn digest of ACTIONABLE findings (newly filed this run).
 
@@ -122,7 +129,14 @@ def _default_digest(
         f"{project_owner}/projects/{project_number}>"
     ]
 
-    if not actionable:
+    if no_scan_alert:
+        headline, reason = no_scan_alert
+        lines.append(f":rotating_light: *CRITICAL — {headline}*: {reason}")
+
+    if not actionable and no_scan_alert:
+        # Nothing was scanned, so "no findings" would read as a clean repo.
+        lines.append("_no findings reported — no check completed_")
+    elif not actionable:
         # Either truly clean OR everything was dup-skipped/below-floor.
         if result.skipped_dup or result.skipped_floor:
             lines.append(

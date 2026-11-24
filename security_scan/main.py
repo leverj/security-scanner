@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import re
 import shutil
 import sys
 import tempfile
@@ -137,26 +138,23 @@ def run(
         # Slack digest (additive, never blocking). We hand it the ACTIONABLE
         # findings (the ones we actually filed); notify._default_digest also
         # reads result.created_findings as the canonical source.
-        if cfg.slack.enabled:
-            post_digest(
-                cfg.slack, result.created_findings, result,
-                cfg.repo, cfg.ref, cfg.project.owner, cfg.project.number,
-            )
-
-        _print_summary(result, completed_scanners, failed, dry_run)
         # Exit 0 even when findings exist — the tool's job is to file, not to gate.
         # Non-zero only on infrastructure failure (already returned above) or
         # all enabled lanes failing. Include image_scan + supabase_live so an
         # image-only or supabase-only config that fails every scan exits 3,
-        # not 0.
-        any_lane_enabled = (
-            cfg.scanners.osv or cfg.scanners.gitleaks or cfg.scanners.semgrep
-            or cfg.scanners.trivy or cfg.scanners.trufflehog or cfg.scanners.syft
-            or cfg.scanners.supply_chain
-            or cfg.image_scan.base_images or cfg.image_scan.built_image.enabled
-            or cfg.supabase.enabled
-        )
-        if not completed_scanners and any_lane_enabled:
+        # not 0. Decided before the digest so the digest can flag it.
+        enabled = _enabled_lanes(cfg)
+        no_scan_completed = not completed_scanners and bool(enabled)
+
+        if cfg.slack.enabled:
+            post_digest(
+                cfg.slack, result.created_findings, result,
+                cfg.repo, cfg.ref, cfg.project.owner, cfg.project.number,
+                no_scan_alert=_no_scan_alert(enabled, failed) if no_scan_completed else None,
+            )
+
+        _print_summary(result, completed_scanners, failed, dry_run)
+        if no_scan_completed:
             print("error: no scanner completed successfully", file=sys.stderr)
             return 3
         return 0
@@ -406,6 +404,54 @@ def _resolve_semgrep_rules(cfg: Config) -> Path | str | None:
         return bundled
     # Last resort: Semgrep's hosted registry (only useful if the container has network)
     return "auto"
+
+
+def _enabled_lanes(cfg: Config) -> list[str]:
+    """Lanes the config turns on, in summary order (image/supabase included)."""
+    sc = cfg.scanners
+    lanes = [name for name, on in (
+        ("osv", sc.osv), ("gitleaks", sc.gitleaks), ("semgrep", sc.semgrep), ("trivy", sc.trivy),
+        ("trufflehog", sc.trufflehog), ("syft", sc.syft), ("supply_chain", sc.supply_chain),
+    ) if on]
+    if cfg.image_scan.base_images or cfg.image_scan.built_image.enabled:
+        lanes.append("image")
+    if cfg.supabase.enabled:
+        lanes.append("supabase_live")
+    return lanes
+
+
+_REDACT = [
+    (re.compile(r"(?i)(://)[^/\s:@]*:[^@\s]+@"), r"\1***@"),                 # URL credentials (user may be empty)
+    (re.compile(r"(?i)\bbearer\s+\S+"), "Bearer ***"),                         # Authorization headers
+    (re.compile(r"\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+"), "***"),           # GitHub tokens
+    (re.compile(r"\b(?:xox[a-z]|xapp)[.-][A-Za-z0-9.-]+"), "***"),               # Slack tokens
+]
+
+
+def _no_scan_alert(enabled: list[str], failed: list[tuple[str, str]]) -> tuple[str, str]:
+    """(headline, reason) for a run in which no enabled lane completed.
+
+    No failures recorded means every enabled lane was skipped for lack of
+    eligible input; otherwise at least one lane was attempted and failed."""
+    if not failed:
+        return ("no scans ran",
+                f"every enabled check was skipped: no eligible input found for {', '.join(enabled)}")
+    shown = []
+    for label, err in failed[:5]:
+        msg = " ".join(str(err).split())
+        for rx, rep in _REDACT:
+            msg = rx.sub(rep, msg)
+        # Slack mrkdwn: escape control characters (after truncating, so an
+        # escape is never cut) so scanner output can't
+        # ping (<!channel>) or render as a link (<url|label>).
+        msg = msg[:120].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        shown.append(f"{label}: {msg}")
+    more = f" (+{len(failed) - 5} more)" if len(failed) > 5 else ""
+    attempted = {label.split(":", 1)[0] for label, _ in failed}
+    skipped = [lane for lane in enabled if lane not in attempted]
+    tail = f"; skipped (no eligible input): {', '.join(skipped)}" if skipped else ""
+    return ("no scans completed",
+            f"{len(failed)} check(s) attempted, none completed — {'; '.join(shown)}{more}{tail}")
 
 
 def _has_rule_files(d: Path) -> bool:
