@@ -13,15 +13,12 @@ def run(
     rules_dir: Path | str,
     exclude: list[str] | None = None,
     binary: str = "semgrep",
+    extra_rules: list[Path] | None = None,
 ) -> RunnerResult:
-    cmd = [
-        binary,
-        "scan",
-        "--config", str(rules_dir),
-        "--sarif",
-        "--metrics=off",
-        "--quiet",
-    ]
+    cmd = [binary, "scan", "--config", str(rules_dir)]
+    for r in extra_rules or []:
+        cmd += ["--config", str(r)]
+    cmd += ["--sarif", "--metrics=off", "--quiet"]
     for pat in exclude or []:
         cmd += ["--exclude", pat]
     cmd.append(str(root))

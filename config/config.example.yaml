@@ -160,3 +160,9 @@ slack:
   # OR for chat.postMessage:
   # channel_id_env: "SLACK_CHANNEL_ID"
   # bot_token_env: "SLACK_BOT_TOKEN"
+
+# Optional, repo-local Semgrep rule files run IN ADDITION to the bundled rules
+# (paths relative to the scanned repo's root; no absolute paths or `..`).
+# Default: none. Each file's sha256 and "N/M rules active" are logged per run.
+# semgrep_extra_rules:
+#   - .security-scan/semgrep/my-rules.yaml

@@ -1,0 +1,6 @@
+rules:
+  - id: image-test-shell-true
+    languages: [python]
+    severity: INFO
+    message: subprocess call with shell=True (image runtime test rule)
+    pattern: subprocess.call(..., shell=True)

@@ -33,6 +33,7 @@ def fake_github(*a, **kw):
         if mode == "fail403":
             raise GitHubError(403, "Resource not accessible by personal access token")
         created.append(title)
+        print(f"HARNESS issue: {title} | {' '.join(body.split())[:600]}", file=sys.stderr)
         n = len(created)
         return {"number": n, "id": n, "node_id": f"I_{n}", "title": title, "body": body, "html_url": "x"}
     gh.create_issue.side_effect = create

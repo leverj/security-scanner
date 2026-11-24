@@ -8,11 +8,14 @@ can never look like "all clear" to downstream tooling.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+import yaml
 
 from security_scan.config import Config, ConfigError, load_config
 from security_scan.detect import DetectionResult, ScannerTarget, detect_stack
@@ -221,7 +224,16 @@ def _invoke_runner(t: ScannerTarget, cfg: Config, repo_dir: Path, semgrep_rules:
     if t.scanner == "semgrep":
         if not semgrep_rules:
             return RunnerResult("semgrep", None, False, "no semgrep rules configured")
-        return mod.run(repo_dir, rules_dir=semgrep_rules, exclude=cfg.paths.exclude)
+        if not cfg.semgrep_extra_rules:
+            return mod.run(repo_dir, rules_dir=semgrep_rules, exclude=cfg.paths.exclude)
+        extra, problem = _extra_semgrep_rules(cfg, repo_dir)
+        if problem:
+            return RunnerResult("semgrep", None, False, problem)
+        result = mod.run(repo_dir, rules_dir=semgrep_rules, exclude=cfg.paths.exclude,
+                         extra_rules=[p for p, _ in extra])
+        if result.completed:
+            _log_extra_rules_active(extra, result.sarif)
+        return result
     if t.scanner == "trivy":
         return mod.run(repo_dir, exclude=cfg.paths.exclude)
     if t.scanner == "trufflehog":
@@ -406,6 +418,42 @@ def _resolve_semgrep_rules(cfg: Config) -> Path | str | None:
         return bundled
     # Last resort: Semgrep's hosted registry (only useful if the container has network)
     return "auto"
+
+
+def _extra_semgrep_rules(cfg: Config, repo_dir: Path) -> tuple[list[tuple[Path, set[str]]], str | None]:
+    """Resolve `semgrep_extra_rules` inside the scanned tree and log each file's
+    sha256 and rule ids. Any missing, escaping or unreadable entry fails the
+    semgrep lane (visible in `failed`) instead of silently scanning without it."""
+    root = repo_dir.resolve()
+    out: list[tuple[Path, set[str]]] = []
+    for rel in cfg.semgrep_extra_rules:
+        p = (repo_dir / rel).resolve()
+        if root != p and root not in p.parents:
+            return [], f"extra rules {rel}: resolves outside the repo"
+        if not p.is_file():
+            return [], f"extra rules {rel}: file not found"
+        try:
+            data = p.read_bytes()
+            doc = yaml.safe_load(data)
+            ids = {r["id"] for r in doc["rules"]}
+        except Exception as e:  # malformed rule files must not read as "ran"
+            return [], f"extra rules {rel}: unreadable rule file ({type(e).__name__})"
+        digest = hashlib.sha256(data).hexdigest()
+        print(f"semgrep: extra rules {rel} sha256={digest} rules={len(ids)}", file=sys.stderr)
+        out.append((p, ids))
+    return out, None
+
+
+def _log_extra_rules_active(extra: list[tuple[Path, set[str]]], sarif: dict | None) -> None:
+    """Report how many of each extra file's rule ids Semgrep actually loaded (from the
+    SARIF rule table; Semgrep prefixes ids with a path-derived namespace)."""
+    loaded = set()
+    for run in (sarif or {}).get("runs", []) or []:
+        for r in ((run.get("tool") or {}).get("driver") or {}).get("rules", []) or []:
+            if isinstance(r, dict) and isinstance(r.get("id"), str):
+                loaded.add(r["id"].rsplit(".", 1)[-1])
+    for p, ids in extra:
+        print(f"semgrep: extra rules {p.name}: {len(ids & loaded)}/{len(ids)} rules active", file=sys.stderr)
 
 
 def _has_rule_files(d: Path) -> bool:
