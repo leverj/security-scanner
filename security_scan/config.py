@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -160,6 +160,9 @@ class Config:
     supply_chain: SupplyChainConfig = field(default_factory=SupplyChainConfig)
     # bundled defaults
     semgrep_rules_dir: str | None = None
+    # Opt-in Semgrep rule files kept in the scanned repo (paths relative to its
+    # root), run in addition to the bundled/mounted rules. Empty = unchanged.
+    semgrep_extra_rules: list[str] = field(default_factory=list)
 
     @property
     def repo_owner(self) -> str:
@@ -294,4 +297,21 @@ def _from_dict(raw: dict) -> Config:
         supabase=sb_cfg,
         supply_chain=sc_cfg,
         semgrep_rules_dir=raw.get("semgrep_rules_dir"),
+        semgrep_extra_rules=_extra_rules(raw.get("semgrep_extra_rules")),
     )
+
+
+def _extra_rules(v: object) -> list[str]:
+    """`semgrep_extra_rules`: a list of repo-relative rule files. Absolute paths and
+    `..` are rejected so a config can only point inside the scanned tree."""
+    if v is None:
+        return []
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.strip() for x in v):
+        raise ConfigError("config: 'semgrep_extra_rules' must be a list of repo-relative file paths")
+    out = []
+    for x in v:
+        pp = PurePosixPath(x.strip())
+        if pp.is_absolute() or ".." in pp.parts:
+            raise ConfigError(f"config: semgrep_extra_rules entry must be repo-relative without '..': {x!r}")
+        out.append(str(pp))
+    return out

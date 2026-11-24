@@ -1,0 +1,7 @@
+rules:
+  - id: image-test-shell-true
+    languages: [python]
+    # WARNING (medium) so the finding clears the default severity floor and is filed.
+    severity: WARNING
+    message: subprocess call with shell=True (image runtime test rule)
+    pattern: subprocess.call(..., shell=True)
